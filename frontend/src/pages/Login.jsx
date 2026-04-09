@@ -1,9 +1,11 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { loginUser } from '../services/authService'; // Importamos el servicio
 
 const Login = () => {
+  const navigate = useNavigate();
+  const [email, setEmail] = useState('');
   const [registro, setRegistro] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e) => {
@@ -11,18 +13,18 @@ const Login = () => {
     setLoading(true);
 
     try {
-      const data = await loginUser(registro, password);
+      const data = await loginUser(email, registro);
 
-      if (data.token) {
-        localStorage.setItem('token', data.token);
-        console.log("Sesión iniciada");
-        window.location.href = '/inicio'; 
+      if (data.status === "Success" || data.user) {
+        navigate('/inicio') 
+      }else{
+        alert("No se encontró el usuario");
+        setLoading(false);
       }
     } catch (mensajeError) {
       alert(mensajeError); // Muestra el error que viene desde el servicio
-    } finally {
-      setLoading(false);
     }
+
   };
 
   return (
@@ -75,8 +77,8 @@ const Login = () => {
                 type="text" 
                 required
                 placeholder="23110115" 
-                value={registro}
-                onChange={(e) => setRegistro(e.target.value)}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="w-full p-5 rounded-2xl bg-[#f8f9fc] border border-slate-100 text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all text-lg"
               />
             </div>
@@ -94,8 +96,8 @@ const Login = () => {
                 type="password" 
                 required
                 placeholder="••••••••" 
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                value={registro}
+                onChange={(e) => setRegistro(e.target.value)}
                 className="w-full p-5 rounded-2xl bg-[#f8f9fc] border border-slate-100 text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all text-lg"
               />
             </div>
