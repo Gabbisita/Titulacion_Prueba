@@ -21,7 +21,7 @@ const Inicio = () => {
       {/* Banner Principal */}
       <section className="bg-[#0a0f1d] h-[65vh] relative flex items-center px-20 text-white">
         <div className="absolute w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[120px] -top-20 -left-20"></div>
-        <div className="relative z-10">
+        <div className="relative z-10"> 
           <h1 className="text-8xl font-black italic tracking-tighter mb-6 leading-none uppercase">SAFE STOCK</h1>
           <p className="text-slate-400 text-xl max-w-md mb-10 italic">División de Ingeniería Mecatrónica</p>
           <Link to="/inventario" className="bg-white text-[#0a0f1d] px-10 py-4 rounded-2xl font-black text-lg hover:scale-105 transition-transform inline-block">
