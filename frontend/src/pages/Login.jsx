@@ -4,8 +4,8 @@ import { loginUser } from '../services/authService';
 
 const Login = () => {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
   const [registro, setRegistro] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -15,18 +15,18 @@ const Login = () => {
     setErrorMessage('');
 
     try {
-      const data = await loginUser(email, registro);
+      const data = await loginUser(registro, password);
 
-      if (data.status === "Success" || data.user) {
+      if (data.status === "success" || data.user) {
         navigate('/inicio');
       } else {
         setErrorMessage("La información es incorrecta. Por favor, verifica tus datos.");
-        setEmail('');    
-        setRegistro(''); 
+        setRegistro('');    
+        setPassword(''); 
       }
     } catch (mensajeError) {
       setErrorMessage(mensajeError || "Error de conexión. Intenta más tarde.");
-      setEmail('');
+      setPassword('');
       setRegistro('');
     } finally {
       setLoading(false);
@@ -89,9 +89,9 @@ const Login = () => {
                 type="text" 
                 required
                 placeholder="ej. 23110115" 
-                value={email}
+                value={registro}
                 onChange={(e) => {
-                    setEmail(e.target.value);
+                    setRegistro(e.target.value);
                     if(errorMessage) setErrorMessage('');
                 }}
                 className={`w-full p-5 rounded-2xl bg-[#f8f9fc] border ${errorMessage ? 'border-red-300' : 'border-slate-100'} text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all text-lg`}
@@ -111,9 +111,9 @@ const Login = () => {
                 type="password" 
                 required
                 placeholder="••••••••" 
-                value={registro}
+                value={password}
                 onChange={(e) => {
-                    setRegistro(e.target.value);
+                    setPassword(e.target.value);
                     if(errorMessage) setErrorMessage('');
                 }}
                 className={`w-full p-5 rounded-2xl bg-[#f8f9fc] border ${errorMessage ? 'border-red-300' : 'border-slate-100'} text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all text-lg`}
