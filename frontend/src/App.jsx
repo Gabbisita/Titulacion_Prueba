@@ -3,18 +3,14 @@ import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-route
 import Login from './pages/Login';
 import Inicio from './pages/Inicio';
 import Inventario from './pages/Inventario';
+import DetalleMaterial from './pages/DetalleMaterial'; // Asegúrate de que este archivo exista
+
 
 function ScrollToTop() {
   const { pathname } = useLocation();
-  
   useEffect(() => {
-    const timer = setTimeout(() => {
-      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-      document.documentElement.scrollTo(0, 0);
-    }, 10);
-    return () => clearTimeout(timer);
+    window.scrollTo(0, 0);
   }, [pathname]);
-
   return null;
 }
 
@@ -26,6 +22,8 @@ function App() {
         <Route path="/" element={<Login />} />
         <Route path="/inicio" element={<Inicio />} />
         <Route path="/inventario" element={<Inventario />} />
+        {/* ESTA ES LA PIEZA QUE FALTA: */}
+        <Route path="/material/:id" element={<DetalleMaterial />} />
       </Routes>
     </Router>
   );
