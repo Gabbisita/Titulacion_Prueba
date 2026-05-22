@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
+import AnimatedPage from '../components/AnimatedPage';
 
 import osciloscopio from '../assets/osciloscopio.jpg';
 
@@ -25,29 +26,18 @@ const Inventario = () => {
     (cat === 'Todas' || m.c === cat) && (est === 'Todos' || m.e === est)
   );
 
-const renderVisual = (src) => {
-  if (typeof src !== 'string' || src.includes('/') || src.includes('static')) {
-    return (
-      <img 
-        src={src} 
-        alt="material" 
-        className="w-full h-full object-cover"
-      />
-    );
-  }
-  return src;
-};
+  const renderVisual = (src) => {
+    if (typeof src !== 'string' || src.includes('/') || src.includes('static')) {
+      return <img src={src} alt="material" className="w-full h-full object-cover" />;
+    }
+    return src;
+  };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 10 }} 
-      animate={{ opacity: 1, y: 0 }} 
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.4 }}
-      className="min-h-screen bg-[#f8f9fc] pb-20 font-sans"
-    >
+    <AnimatedPage>
+      <div className="min-h-screen bg-[#f8f9fc] pb-20 font-sans">
       <Navbar />
-      <div className="p-16 max-w-7xl mx-auto">
+      <div className="p-16 max-w-7xl mx-auto flex flex-col">
         <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-6">
           <div className="text-left">
             <h1 className="text-6xl font-black text-[#1a1f2e] italic tracking-tighter mb-4 uppercase leading-none">INVENTARIO</h1>
@@ -91,7 +81,7 @@ const renderVisual = (src) => {
                   <span className="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em] mb-2 block">
                     {m.c}
                   </span>
-                  <h3 className="text-[#1a1f2e] font-black text-xl mb-2 uppercase tracking-tight italic leading-tight min-h-[3rem] flex items-center justify-center">
+                  <h3 className="text-[#1a1f2e] font-black text-xl mb-2 uppercase tracking-tight italic leading-tight min-h-12 flex items-center justify-center">
                     {m.n}
                   </h3>
                   <p className="text-slate-400 font-bold text-xs mb-6">{m.d} disponibles</p>
@@ -105,7 +95,8 @@ const renderVisual = (src) => {
           </AnimatePresence>
         </div>
       </div>
-    </motion.div>
+      </div>
+    </AnimatedPage>
   );
 };
 
