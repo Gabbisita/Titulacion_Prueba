@@ -1,26 +1,56 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // <-- IMPORTANTE: Agregar useEffect
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import AnimatedPage from '../components/AnimatedPage';
 
-import osciloscopio from '../assets/osciloscopio.jpg';
-
 const Inventario = () => {
   const navigate = useNavigate();
   const [cat, setCat] = useState('Todas');
   const [est, setEst] = useState('Todos');
+  
+  // 1. Iniciamos el inventario como un arreglo vacío
+  const [materiales, setMateriales] = useState([]);
 
-  const materiales = [
-    { id: 1, n: 'Fuente variadora', d: 24, e: 'EN STOCK', c: 'Electrónica', i: '🔬' }, 
-    { id: 2, n: 'Multímetro Digital', d: 11, e: 'EN STOCK', c: 'Electrónica', i: '🔬' },
-    { id: 3, n: 'Osciloscopio', d: 0, e: 'AGOTADO', c: 'Electrónica', i: osciloscopio }, 
-    { id: 4, n: 'Arduino Uno R3', d: 15, e: 'EN STOCK', c: 'Electrónica', i: '🤖' },
-    { id: 5, n: 'Destornillador set', d: 3, e: 'PRESTADO', c: 'Herramientas', i: '🔧' },
-    { id: 6, n: 'Generador de señales', d: 2, e: 'EN STOCK', c: 'Electrónica', i: '📟' },
-    { id: 7, n: 'Kit tornillería', d: 8, e: 'EN STOCK', c: 'Herramientas', i: '🔩' },
-    { id: 8, n: 'Martillo', d: 7, e: 'EN STOCK', c: 'Herramientas', i: '🔨' },
-  ];
+  // 2. Usamos useEffect para ir a buscar los datos a tu servidor Node.js
+  useEffect(() => {
+    const obtenerMateriales = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/api/materiales');
+        const data = await response.json();
+
+        // 3. Traducimos los datos de tu Base de Datos al formato de Kenya
+        const inventarioReal = data.map((item) => {
+          
+          // Calculamos la categoría basada en tu número (FK)
+          let categoriaTexto = 'Otros';
+          if (item.FK_No_Categoria === 1) categoriaTexto = 'Electrónica';
+          if (item.FK_No_Categoria === 2) categoriaTexto = 'Mecánica';
+          if (item.FK_No_Categoria === 3) categoriaTexto = 'Consumibles';
+          if (item.FK_No_Categoria === 4) categoriaTexto = 'Equipos';
+
+          return {
+            id: item.ID_Material,
+            n: item.Nombre, // El nombre del material
+            d: item.Cantidad, // El stock disponible
+            c: categoriaTexto, // La categoría en texto
+            e: item.Cantidad > 0 ? 'EN STOCK' : 'AGOTADO', // Calculamos el estado en vivo
+            i: `/images/${item.ID_Material}.jpg` // Opción A: La ruta de la imagen local
+          };
+        });
+
+        // 4. Guardamos los datos reales en el estado para que React dibuje la página
+        setMateriales(inventarioReal);
+
+      } catch (error) {
+        console.error("Error conectando con el servidor:", error);
+      }
+    };
+
+    obtenerMateriales(); // Ejecutamos la función
+  }, []); // Los corchetes vacíos significan que solo se ejecuta 1 vez al abrir la página
+
+  // --- De aquí para abajo el código de Kenya se queda EXACTAMENTE IGUAL ---
 
   const filtrados = materiales.filter(m => 
     (cat === 'Todas' || m.c === cat) && (est === 'Todos' || m.e === est)
@@ -49,6 +79,10 @@ const Inventario = () => {
               <option value="Todas">Todas las categorías</option>
               <option value="Electrónica">Electrónica</option>
               <option value="Herramientas">Herramientas</option>
+              {/* Le agregué Mecánica, Consumibles y Equipos para que coincida con tu BD */}
+              <option value="Mecánica">Mecánica</option> 
+              <option value="Consumibles">Consumibles</option>
+              <option value="Equipos">Equipos</option>
             </select>
             <select value={est} onChange={(e) => setEst(e.target.value)} className="bg-white border-2 border-slate-100 p-4 rounded-2xl text-sm font-bold text-slate-600 outline-none shadow-sm cursor-pointer hover:border-blue-300 transition-all">
               <option value="Todos">Todos los estados</option>

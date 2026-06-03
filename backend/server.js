@@ -22,6 +22,20 @@ app.post('/login', (req, res) => {
     });
 });
 
+// --- RUTA DEL CATÁLOGO DE MATERIALES ---
+app.get('/api/materiales', (req, res) => {
+    const query = 'SELECT * FROM material';
+
+    db.query(query, (err, results) => {
+        // Si hay error en la BD, mandamos el status 500
+        if (err) return res.status(500).json({ error: err.message });
+        
+        // Si todo sale bien, mandamos la lista de materiales con status 200
+        res.status(200).json(results);
+    });
+});
+
+
 app.listen(5000, () => {
     console.log("Servidor corriendo en el puerto 5000");
 });
