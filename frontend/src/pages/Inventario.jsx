@@ -78,11 +78,8 @@ const Inventario = () => {
             <select value={cat} onChange={(e) => setCat(e.target.value)} className="bg-white border-2 border-slate-100 p-4 rounded-2xl text-sm font-bold text-slate-600 outline-none shadow-sm cursor-pointer hover:border-blue-300 transition-all">
               <option value="Todas">Todas las categorías</option>
               <option value="Electrónica">Electrónica</option>
-              <option value="Herramientas">Herramientas</option>
-              {/* Le agregué Mecánica, Consumibles y Equipos para que coincida con tu BD */}
               <option value="Mecánica">Mecánica</option> 
               <option value="Consumibles">Consumibles</option>
-              <option value="Equipos">Equipos</option>
             </select>
             <select value={est} onChange={(e) => setEst(e.target.value)} className="bg-white border-2 border-slate-100 p-4 rounded-2xl text-sm font-bold text-slate-600 outline-none shadow-sm cursor-pointer hover:border-blue-300 transition-all">
               <option value="Todos">Todos los estados</option>

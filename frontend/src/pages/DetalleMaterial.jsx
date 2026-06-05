@@ -2,32 +2,59 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import AnimatedPage from '../components/AnimatedPage';
 
-
-import heroImg from '../assets/hero.png';
-import osciloscopio from '../assets/osciloscopio.jpg';
+// Eliminamos los imports de imágenes locales porque ahora usaremos las de la carpeta public/images
 
 const DetalleMaterial = () => {
   const navigate = useNavigate();
   const { id } = useParams(); 
   const [cantidad, setCantidad] = useState(1);
   const [material, setMaterial] = useState(null);
+  
+  // NUEVO: Estado para saber si seguimos esperando al servidor
+  const [cargando, setCargando] = useState(true);
 
-  const materialesDB = [
-    { id: 1, n: 'Fuente variadora', d: 24, e: 'EN STOCK', c: 'Electrónica', i: heroImg, desc: 'Fuente de poder regulable ideal para proyectos de circuitos integrados.' },
-    { id: 2, n: 'Multímetro Digital', d: 11, e: 'EN STOCK', c: 'Electrónica', i: '🔬', desc: 'Herramienta de medición de alta precisión para voltaje, corriente y resistencia.' },
-    { id: 3, n: 'Osciloscopio', d: 0, e: 'AGOTADO', c: 'Electrónica', i: osciloscopio, desc: 'Equipo avanzado para visualización de señales de frecuencia de hasta 100MHz.' },
-    { id: 4, n: 'Arduino Uno R3', d: 15, e: 'EN STOCK', c: 'Electrónica', i: '🤖', desc: 'Placa de desarrollo microcontrolada para prototipado rápido de proyectos.' },
-    { id: 5, n: 'Destornillador set', d: 3, e: 'PRESTADO', c: 'Herramientas', i: '🔧', desc: 'Set completo de destornilladores de precisión con puntas intercambiables.' },
-    { id: 6, n: 'Generador de señales', d: 2, e: 'EN STOCK', c: 'Electrónica', i: '📟', desc: 'Generador de funciones para pruebas de laboratorio y análisis de circuitos.' },
-    { id: 7, n: 'Kit tornillería', d: 8, e: 'EN STOCK', c: 'Herramientas', i: '🔩', desc: 'Kit de diversos tamaños y métricas para ensambles mecánicos generales.' },
-    { id: 8, n: 'Martillo', d: 7, e: 'EN STOCK', c: 'Herramientas', i: '🔨', desc: 'Herramienta básica de impacto con mango ergonómico para taller mecánico.' },
-  ];
-
+  // NUEVO: El Efecto que va al backend por los datos reales
   useEffect(() => {
-    const encontrado = materialesDB.find(m => m.id === parseInt(id));
-    setMaterial(encontrado);
+    const obtenerMaterial = async () => {
+      try {
+        const response = await fetch(`http://localhost:5000/api/materiales/${id}`);
+        
+        if (response.ok) {
+          const item = await response.json();
+          
+          // Calculamos la categoría de texto según tu llave foránea
+          let categoriaTexto = 'Otros';
+          if (item.FK_No_Categoria === 1) categoriaTexto = 'Electrónica';
+          if (item.FK_No_Categoria === 2) categoriaTexto = 'Mecánica';
+          if (item.FK_No_Categoria === 3) categoriaTexto = 'Consumibles';
+          if (item.FK_No_Categoria === 4) categoriaTexto = 'Equipos';
+
+          // EL TRADUCTOR: Transformamos los datos de TiDB al formato de Kenya
+          const materialTraducido = {
+            id: item.ID_Material,
+            n: item.Nombre,
+            d: item.Cantidad,
+            e: item.Cantidad > 0 ? 'EN STOCK' : 'AGOTADO',
+            c: categoriaTexto,
+            i: `/images/${item.ID_Material}.jpg`, // Ruta a la imagen local
+            desc: item.Descripcion || 'Equipo disponible en los laboratorios de mecatrónica.'
+          };
+
+          setMaterial(materialTraducido);
+        } else {
+          console.error("Material no encontrado en la base de datos");
+        }
+      } catch (error) {
+        console.error("Error conectando con el servidor de Node:", error);
+      } finally {
+        setCargando(false); // Apagamos la pantalla de carga
+      }
+    };
+
+    obtenerMaterial();
   }, [id]);
 
+  // Esta función se queda idéntica, la lógica del carrito de Kenya es excelente
   const agregarASolicitudDirecta = () => {
     if (!material) return;
 
@@ -41,7 +68,7 @@ const DetalleMaterial = () => {
         id: material.id,
         n: material.n,
         cantidad: cantidad,
-        codigo: `EL-00${material.id}`
+        codigo: `EL-00${material.id}` // Esto generará códigos como EL-0030001
       });
     }
 
@@ -49,8 +76,21 @@ const DetalleMaterial = () => {
     navigate('/solicitud'); 
   };
 
-  if (!material) return <div className="text-white p-20 font-black italic uppercase">Cargando material...</div>;
+  // NUEVO: Pantalla de carga mientras responde el servidor
+  if (cargando) {
+    return (
+      <div className="min-h-screen bg-[#0a0f1d] flex items-center justify-center">
+        <div className="text-blue-500 text-2xl font-black italic uppercase animate-pulse">
+          Conectando con Almacén...
+        </div>
+      </div>
+    );
+  }
 
+  // Si se puso un ID inválido en la URL
+  if (!material) return <div className="text-red-500 p-20 font-black italic uppercase text-center bg-[#0a0f1d] min-h-screen">Material no encontrado</div>;
+
+  // --- DE AQUÍ HACIA ABAJO EL DISEÑO DE KENYA QUEDA INTACTO ---
   return (
     <AnimatedPage>
       <div className="min-h-screen bg-[#0a0f1d] font-sans text-white p-6 md:p-12">
@@ -66,7 +106,7 @@ const DetalleMaterial = () => {
           <div className="absolute -inset-1 bg-linear-to-r from-blue-600 to-cyan-500 rounded-3xl blur opacity-25 group-hover:opacity-40 transition duration-1000"></div>
           <div className="relative bg-[#111827] border border-white/10 rounded-3xl overflow-hidden flex items-center justify-center h-125">
             {typeof material.i !== 'string' || material.i.length > 5 ? (
-              <img src={material.i} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" alt={material.n} />
+              <img src={material.i} className="w-full h-full object-contain p-4 transition-transform duration-500 group-hover:scale-110" alt={material.n} />
             ) : (
               <div className="text-9xl drop-shadow-2xl">{material.i}</div>
             )}
@@ -92,7 +132,6 @@ const DetalleMaterial = () => {
             <div className={`w-4 h-4 rounded-full animate-pulse shadow-lg ${material.e === 'EN STOCK' ? 'bg-green-500 shadow-green-500/50' : 'bg-red-500 shadow-red-500/50'}`}></div>
           </div>
 
-
           <div className="flex gap-4">
             {material.e === 'EN STOCK' && (
               <div className="flex items-center bg-white/5 border border-white/10 rounded-2xl p-2 shadow-lg">
@@ -116,7 +155,7 @@ const DetalleMaterial = () => {
           </div>
           
           <p className="mt-8 text-slate-500 text-[11px] text-center italic border-t border-white/5 pt-6">
-            * Se requiere credencial vigente para procesar la solicitud en el mostrador.
+            * Se requiere credencial vigente de CETI para procesar la solicitud en el mostrador.
           </p>
         </div>
       </div>
