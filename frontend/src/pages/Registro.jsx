@@ -6,6 +6,7 @@ const Registro = () => {
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
+    nombre: '',
     correo: '',
     matricula: '',
     carrera: 'Ingeniería en Mecatrónica',
@@ -17,6 +18,23 @@ const Registro = () => {
     aceptarTerminos: true
   });
 
+  // --- LAS DOS LISTAS DE CARRERAS QUE AGREGAMOS A TU BASE DE DATOS ---
+  const carrerasIngenieria = [
+    'Ingeniería en Mecatrónica',
+    'Ingeniería en Automatización',
+    'Ingeniería en Diseño Mecánico'
+  ];
+
+  const carrerasTecnologo = [
+    'Tecnólogo en Mecatrónica',
+    'Tecnólogo en Control Automático',
+    'Tecnólogo en Mecánica Industrial',
+    'Tecnólogo en Desarrollo de Software'
+  ];
+
+  // React calculará qué lista usar en tiempo real dependiendo del nivel seleccionado
+  const opcionesCarrera = formData.nivel === 'Ingeniero' ? carrerasIngenieria : carrerasTecnologo;
+
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData(prev => ({
@@ -25,8 +43,21 @@ const Registro = () => {
     }));
   };
 
-  const procesarRegistro = (e) => {
+  // --- FUNCIÓN PARA CAMBIAR DE NIVEL SIN BUGS ---
+  const cambiarNivel = (nuevoNivel) => {
+    // Si cambia de nivel, reseteamos la carrera a la primera opción de la nueva lista
+    const carreraPorDefecto = nuevoNivel === 'Ingeniero' ? carrerasIngenieria[0] : carrerasTecnologo[0];
+    
+    setFormData(prev => ({
+      ...prev,
+      nivel: nuevoNivel,
+      carrera: carreraPorDefecto
+    }));
+  };
+
+  const procesarRegistro = async (e) => {
     e.preventDefault();
+    
     if (!formData.aceptarTerminos) {
       alert("Debes aceptar los términos y condiciones del sistema.");
       return;
@@ -35,9 +66,38 @@ const Registro = () => {
       alert("Las contraseñas no coinciden. Por favor verifica.");
       return;
     }
-    
-    alert("¡Cuenta creada con éxito! Bienvenido a SafeStock.");
-    navigate('/'); // Redirige al login listo para entrar
+
+    try {
+      const response = await fetch('http://localhost:5000/registro', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nombre: formData.nombre,
+          registro_alu: formData.matricula,
+          email: formData.correo,
+          password: formData.contrasena,
+          // ¡AQUÍ ESTÁ LA MAGIA DEL FRONTEND HACIA EL BACKEND!
+          // Ahora le mandamos los datos extra para que tu servidor los traduzca a IDs
+          telefono: formData.telefono,
+          carrera_texto: formData.carrera,
+          semestre_texto: formData.semestre
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.message);
+        return;
+      }
+
+      alert("¡Cuenta creada con éxito! Bienvenido a SafeStock.");
+      navigate('/'); 
+
+    } catch (error) {
+      console.error("Error al registrar:", error);
+      alert("Error de conexión con el servidor. Revisa que esté encendido.");
+    }
   };
 
   return (
@@ -47,6 +107,7 @@ const Registro = () => {
       className="min-h-screen bg-[#f8f9fc] font-sans flex flex-col md:flex-row text-left text-slate-700"
     >
       
+      {/* --- LADO OSCURO DEL DISEÑO --- */}
       <div className="w-full md:w-[35%] bg-[#0a0f1d] text-white p-8 md:p-12 flex flex-col justify-between relative overflow-hidden min-h-[250px] md:min-h-screen flex-shrink-0">
         <div className="absolute -top-24 -left-24 w-64 h-64 bg-blue-600/10 rounded-full blur-3xl"></div>
         <div className="flex items-center gap-3 z-10">
@@ -92,6 +153,7 @@ const Registro = () => {
         </div>
       </div>
 
+      {/* --- FORMULARIO BLANCO --- */}
       <div className="flex-1 p-6 md:p-12 lg:p-16 flex items-center justify-center bg-white overflow-y-auto">
         <div className="w-full max-w-2xl">
           
@@ -100,17 +162,27 @@ const Registro = () => {
             <p className="text-slate-400 font-bold text-[11px] uppercase tracking-wide">Todos los campos son obligatorios</p>
           </header>
 
-          {/* Listón de navegación superior estético */}
           <div className="grid grid-cols-3 bg-slate-100 p-1 rounded-xl gap-1 mb-8 text-center text-[10px] font-black uppercase tracking-tight">
             <div className="py-2 bg-blue-600 text-white rounded-lg shadow-sm">1. Datos personales</div>
             <div className="py-2 text-slate-400">2. Datos académicos</div>
             <div className="py-2 text-slate-400">3. Confirmación</div>
           </div>
 
-          {/* Formulario unificado */}
           <form onSubmit={procesarRegistro} className="space-y-5 text-left">
             
-            {/* Fila 1: Correo y Matrícula */}
+            <div>
+              <label className="block text-slate-500 text-[10px] font-black uppercase tracking-widest mb-1.5">Nombre Completo</label>
+              <input 
+                type="text" 
+                name="nombre"
+                value={formData.nombre}
+                onChange={handleChange}
+                required
+                placeholder="Ingresa tu nombre y apellidos"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold outline-none focus:border-blue-500 focus:bg-white transition-all text-slate-800"
+              />
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-slate-500 text-[10px] font-black uppercase tracking-widest mb-1.5">Correo institucional</label>
@@ -138,36 +210,21 @@ const Registro = () => {
               </div>
             </div>
 
-            {/* Fila 2: Selector de Carrera */}
-            <div>
-              <label className="block text-slate-500 text-[10px] font-black uppercase tracking-widest mb-1.5">Carrera que cursa</label>
-              <select 
-                name="carrera"
-                value={formData.carrera}
-                onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold outline-none text-slate-800 focus:border-blue-500 focus:bg-white transition-all"
-              >
-                <option value="Ingeniería en Mecatrónica">Ingeniería en Mecatrónica</option>
-                <option value="Ingeniería en Automatización">Ingeniería en Automatización</option>
-                <option value="Ingeniería en Diseño Mecánico">Ingeniería en Diseño Mecánico</option>
-              </select>
-            </div>
-
-            {/* Fila 3: Nivel de estudios y Semestre */}
+            {/* --- LOS BOTONES DE NIVEL --- */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-slate-500 text-[10px] font-black uppercase tracking-widest mb-1.5">Nivel de estudios</label>
                 <div className="grid grid-cols-2 bg-slate-100 p-1 rounded-xl gap-1 text-center font-bold text-xs">
                   <button 
                     type="button" 
-                    onClick={() => setFormData(prev => ({...prev, nivel: 'Ingeniero'}))}
+                    onClick={() => cambiarNivel('Ingeniero')}
                     className={`py-2 rounded-lg transition-all ${formData.nivel === 'Ingeniero' ? 'bg-white text-blue-600 border border-blue-100 shadow-sm font-black' : 'text-slate-400'}`}
                   >
                     Ingeniero
                   </button>
                   <button 
                     type="button" 
-                    onClick={() => setFormData(prev => ({...prev, nivel: 'Tecnólogo'}))}
+                    onClick={() => cambiarNivel('Tecnólogo')}
                     className={`py-2 rounded-lg transition-all ${formData.nivel === 'Tecnólogo' ? 'bg-white text-blue-600 border border-blue-100 shadow-sm font-black' : 'text-slate-400'}`}
                   >
                     Tecnólogo
@@ -175,6 +232,24 @@ const Registro = () => {
                 </div>
               </div>
 
+              {/* --- EL SELECT DE CARRERA DINÁMICO --- */}
+              <div>
+                <label className="block text-slate-500 text-[10px] font-black uppercase tracking-widest mb-1.5">Carrera que cursa</label>
+                <select 
+                  name="carrera"
+                  value={formData.carrera}
+                  onChange={handleChange}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold outline-none text-slate-800 focus:border-blue-500 focus:bg-white transition-all"
+                >
+                  {/* React dibuja aquí las opciones usando un mapa */}
+                  {opcionesCarrera.map((opcion) => (
+                    <option key={opcion} value={opcion}>{opcion}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-slate-500 text-[10px] font-black uppercase tracking-widest mb-1.5">Semestre actual</label>
                 <select 
@@ -190,23 +265,21 @@ const Registro = () => {
                   <option value="9° Semestre">9° Semestre</option>
                 </select>
               </div>
+              
+              <div>
+                <label className="block text-slate-500 text-[10px] font-black uppercase tracking-widest mb-1.5">Número de teléfono</label>
+                <input 
+                  type="tel" 
+                  name="telefono"
+                  value={formData.telefono}
+                  onChange={handleChange}
+                  required
+                  placeholder="ej. 33 1234 5678"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold outline-none focus:border-blue-500 focus:bg-white transition-all text-slate-800"
+                />
+              </div>
             </div>
 
-            {/* Fila 4: Teléfono */}
-            <div>
-              <label className="block text-slate-500 text-[10px] font-black uppercase tracking-widest mb-1.5">Número de teléfono</label>
-              <input 
-                type="tel" 
-                name="telefono"
-                value={formData.telefono}
-                onChange={handleChange}
-                required
-                placeholder="ej. 33 1234 5678"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold outline-none focus:border-blue-500 focus:bg-white transition-all text-slate-800"
-              />
-            </div>
-
-            {/* Fila 5: Contraseñas */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-slate-500 text-[10px] font-black uppercase tracking-widest mb-1.5">Contraseña</label>
@@ -234,7 +307,6 @@ const Registro = () => {
               </div>
             </div>
 
-            {/* Fila 6: Checkbox de términos */}
             <div className="flex items-start gap-2.5 pt-2">
               <input 
                 type="checkbox" 
@@ -249,13 +321,12 @@ const Registro = () => {
               </label>
             </div>
 
-            {/* Botonazo de Envío */}
             <div className="pt-2">
               <button 
                 type="submit"
                 className="w-full bg-[#2563eb] hover:bg-blue-700 text-white font-black py-3.5 rounded-xl uppercase tracking-tight text-xs shadow-md shadow-blue-500/15 transition-all transform active:scale-[0.99]"
               >
-                Continuar → Datos académicos
+                Crear Cuenta Segura
               </button>
               
               <p className="text-center text-xs text-slate-400 font-bold mt-4">
