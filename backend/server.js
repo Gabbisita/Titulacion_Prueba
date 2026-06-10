@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('./db');
 const cors = require('cors');
-const bcrypt = requiere('bcrypt');
+const bcrypt = require('bcrypt');
 
 const app = express();
 app.use(cors());
@@ -9,10 +9,10 @@ app.use(express.json());
 
 // --- VENTANILLA 1: LOGIN ---
 app.post('/login', (req, res) => {
-    const { registro, password } = req.body;
-    const query = "SELECT * FROM alumno WHERE Email = ? AND Registro_Alu = ?";
+    const { email, password } = req.body;
+    const query = "SELECT * FROM alumno WHERE Email = ? AND Password = ?";
 
-    db.query(query, [registro, password], (err, result) => {
+    db.query(query, [email, password], (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
 
         if (result.length > 0) {

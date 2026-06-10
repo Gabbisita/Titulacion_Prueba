@@ -5,7 +5,7 @@ import AnimatedPage from '../components/AnimatedPage';
 
 const Login = () => {
   const navigate = useNavigate();
-  const [registro, setRegistro] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -22,13 +22,13 @@ const Login = () => {
         navigate('/inicio');
       } else {
         setErrorMessage("La información es incorrecta. Por favor, verifica tus datos.");
-        setRegistro('');    
+        setEmail('');    
         setPassword(''); 
       }
     } catch (mensajeError) {
       setErrorMessage(mensajeError || "Error de conexión. Intenta más tarde.");
+      setEmail('');
       setPassword('');
-      setRegistro('');
     } finally {
       setLoading(false);
     }
@@ -82,15 +82,15 @@ const Login = () => {
 
               <div className="text-left">
                 <label className="block text-[11px] font-black text-slate-800 uppercase tracking-[0.15em] mb-3 text-left">
-                  Registro
+                  Correo
                 </label>
                 <input 
                   type="text" 
                   required
-                  placeholder="ej. 23110115" 
-                  value={registro}
+                  placeholder="ej. 19100412@ceti.mx" 
+                  value={correo}
                   onChange={(e) => {
-                      setRegistro(e.target.value);
+                      setEmail(e.target.value);
                       if(errorMessage) setErrorMessage('');
                   }}
                   className={`w-full p-5 rounded-2xl bg-[#f8f9fc] border ${errorMessage ? 'border-red-300' : 'border-slate-100'} text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all text-lg`}
