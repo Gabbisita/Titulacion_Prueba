@@ -8,32 +8,50 @@ const Pedidos = () => {
   const navigate = useNavigate();
   const [pedidosReales, setPedidosReales] = useState([]);
 
+  // 1. Leemos quién está usando la computadora
+  const sesion = localStorage.getItem('usuario_safestock');
+  const alumnoActual = sesion ? JSON.parse(sesion) : null;
+  const matricula = alumnoActual ? (alumnoActual.Registro_Alu || alumnoActual.id) : null;
+
   useEffect(() => {
-    const guardados = localStorage.getItem('historial_pedidos_safe');
-    if (guardados) {
-      setPedidosReales(JSON.parse(guardados));
+    if (!matricula) {
+      navigate('/login');
+      return;
     }
-  }, []);
+
+    // 2. Traemos los datos reales de TiDB
+    const buscarPedidos = async () => {
+      try {
+        const respuesta = await fetch(`http://localhost:5000/api/mis-pedidos/${matricula}`);
+        const datos = await respuesta.json();
+
+        if (datos.status === "success") {
+          const pedidosAdaptados = datos.pedidos.map(bd => ({
+            id: bd.ID_Pedido,
+            fecha: bd.Fecha_Recogida,
+            solicitante: `Mi Rol: ${bd.Rol}`, 
+            estado: bd.Estado,
+            proposito: bd.Proposito,
+            detalles: bd.ListaMateriales ? bd.ListaMateriales.split('|') : ["Sin materiales registrados"] 
+          }));
+          
+          setPedidosReales(pedidosAdaptados);
+        }
+      } catch (error) {
+        console.error("Error al traer historial:", error);
+      }
+    };
+
+    buscarPedidos();
+  }, [matricula, navigate]);
 
   const pasosTimeline = ['Solicitado', 'Aceptado', 'En preparación', 'En casillero', 'Devuelto', 'Cerrado OK'];
-
-  const cambiarEstadoAdmin = (pedidoId, nuevoEstado) => {
-    const historialActualizado = pedidosReales.map(pedido => {
-      if (pedido.id === pedidoId) {
-        return { ...pedido, estado: nuevoEstado };
-      }
-      return pedido;
-    });
-    
-    setPedidosReales(historialActualizado);
-    localStorage.setItem('historial_pedidos_safe', JSON.stringify(historialActualizado));
-  };
 
   return (
     <AnimatedPage>
       <div className="min-h-screen bg-[#f8f9fc] font-sans pb-20 text-slate-700">
       <Navbar />
-      <div className="max-w-325 mx-auto px-6 md:px-10 pt-12 text-left">
+      <div className="max-w-3xl mx-auto px-6 md:px-10 pt-12 text-left">
         <header className="mb-10">
           <h1 className="text-4xl font-black text-[#1a1f2e] tracking-tight mb-2">Mis pedidos</h1>
           <p className="text-slate-400 font-medium text-sm">Seguimiento en tiempo real de tus solicitudes de préstamo</p>
@@ -52,18 +70,7 @@ const Pedidos = () => {
               const indiceActual = pasosTimeline.indexOf(pedido.estado || 'Solicitado');
               return (
                 <motion.div key={pedido.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="bg-white border border-slate-100 rounded-4xl p-6 md:p-8 shadow-sm relative">
-                  <div className="absolute top-6 right-6 z-20 bg-slate-50 border border-slate-200 p-2 rounded-xl flex items-center gap-2 shadow-sm">
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider pl-1">⚙ Simulador Admin:</span>
-                    <select 
-                      value={pedido.estado || 'Solicitado'} 
-                      onChange={(e) => cambiarEstadoAdmin(pedido.id, e.target.value)}
-                      className="bg-white border border-slate-200 rounded-lg p-1 text-xs font-bold text-blue-600 outline-none cursor-pointer"
-                    >
-                      {pasosTimeline.map(paso => (
-                        <option key={paso} value={paso}>{paso}</option>
-                      ))}
-                    </select>
-                  </div>
+                  
 
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4 mb-6 pr-44 text-left">
                     <div>
@@ -80,8 +87,16 @@ const Pedidos = () => {
                   </div>
 
                   <div className="mb-8 text-left">
-                    <p className="text-slate-800 font-black text-sm uppercase italic tracking-tight">{pedido.detalles}</p>
-                    <p className="text-slate-400 text-xs mt-1 font-medium">Proyecto: <span className="italic">"{pedido.proposito}"</span></p>
+                    <ul className="list-disc pl-5 text-slate-800 font-black text-sm uppercase italic tracking-tight space-y-1">
+                      {Array.isArray(pedido.detalles) ? (
+                        pedido.detalles.map((articulo, index) => (
+                          <li key={index}>{articulo}</li>
+                        ))
+                      ) : (
+                        <li>{pedido.detalles}</li>
+                      )}
+                    </ul>
+                    <p className="text-slate-400 text-xs mt-3 font-medium">Proyecto: <span className="italic">"{pedido.proposito}"</span></p>
                   </div>
 
                   <div className="relative flex flex-col md:flex-row justify-between items-center gap-6 md:gap-2 px-4 mb-6">

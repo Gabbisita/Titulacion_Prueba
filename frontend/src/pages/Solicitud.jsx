@@ -1,21 +1,75 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, interpolate } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import AnimatedPage from '../components/AnimatedPage';
 
 const Solicitud = () => {
   const navigate = useNavigate();
+
+// --- 1. CALCULADORA DE FECHAS DINÁMICAS (CON FILTRO DE FIN DE SEMANA) ---
+  const generarFechas = () => {
+    const listaFechas = [];
+    const diasCortos = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    const diasCompletos = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+    let diasAgregados = 0; // Cuántos días hábiles hemos guardado
+    let diasAAvanzar = 0;  // Cuántos días nos hemos movido en el calendario real
+
+    // Queremos generar 10 días hábiles en total (2 semanas de Lunes a Viernes)
+    while (diasAgregados < 15) {
+      const d = new Date();
+      d.setDate(d.getDate() + diasAAvanzar);
+      
+      const numeroDia = d.getDay(); // 0 es Domingo, 6 es Sábado
+      
+      // FILTRO: Solo guardamos el día si NO es Domingo (0) y NO es Sábado (6)
+      if (numeroDia !== 0 && numeroDia !== 6) {
+        listaFechas.push({
+          id: diasAAvanzar,
+          esHoy: diasAAvanzar === 0, // Bloqueamos el día de hoy por regla del almacén
+          valorLargo: `${diasCompletos[numeroDia]} ${d.getDate()} de ${meses[d.getMonth()]}, ${d.getFullYear()}`,
+          etiquetaBoton: `${diasCortos[numeroDia]} ${d.getDate()}`
+        });
+        
+        diasAgregados++; // Sumamos uno a nuestra cuenta de días hábiles
+      }
+      
+      diasAAvanzar++; // Avanzamos un día en el calendario de todas formas
+    }
+    
+    return listaFechas;
+  };
+
+  // Guardamos las fechas generadas en una constante para usarlas en los botones
+  const opcionesFechas = generarFechas();
   
-  const [fecha, setFecha] = useState('Miércoles 19 de marzo, 2025');
+  // ESTADO INICIAL DINÁMICO: Por regla del CETI, se selecciona "mañana" por defecto (índice 1)
+  const [fecha, setFecha] = useState(opcionesFechas[1].valorLargo);
+  
   const [esEquipo, setEsEquipo] = useState(true);
   const [proposito, setProposito] = useState('...');
   const [matriculaNueva, setMatriculaNueva] = useState('');
   const [mostrarInputMatricula, setMostrarInputMatricula] = useState(false);
   
-  const [integrantes, setIntegrantes] = useState([
-    { id: 1, nombre: 'Leo', matricula: '23110177', rol: 'Colaborador' }
-  ]);
+  const [integrantes, setIntegrantes] = useState(() => {
+    const sesion = localStorage.getItem('usuario_safestock');
+
+    const alumnoReal = sesion ? JSON.parse(sesion) : null;
+
+    return [
+      {
+        id: 1,
+        nombre: alumnoReal ? alumnoReal.nombre : 'Solicitante',
+        matricula: alumnoReal ? alumnoReal.Registro_Alu : '00000000',
+        rol: 'Lider'
+      }
+
+    ];
+
+
+});
 
   // Leer materiales agregados
   const [materiales, setMateriales] = useState(() => {
@@ -48,28 +102,59 @@ const Solicitud = () => {
     setMostrarInputMatricula(false);
   };
 
-  const enviarSolicitud = () => {
+    // Agregamos 'async' porque el mensajero tarda unos milisegundos en ir y venir a la BD
+  const enviarSolicitud = async () => {
+    // CANDADO 1: Que no vaya vacío el propósito (Quitando espacios en blanco)
+    if (!proposito || !proposito.trim()) {
+      alert("Por favor, escribe el propósito del proyecto antes de enviar la solicitud.");
+      return;
+    }
+
+    // CANDADO 2: Que haya materiales en el carrito
     if (materiales.length === 0) {
       alert("No hay materiales en tu resumen para solicitar.");
       return;
     }
+    
 
-    const nuevoPedido = {
-      id: `PED-2024-${Math.floor(1000 + Math.random() * 9000)}`,
-      fecha: '19 mar 2025',
-      solicitante: esEquipo ? 'A. López · 23110178' : 'Kenya Gabriela Frutos González',
-      detalles: materiales.map(m => `${m.cantidad}× ${m.n}`).join(' · '),
-      estado: 'Solicitado',
-      proposito: proposito
+    // 1. Empaquetamos los datos EXACTAMENTE como los pide tu server.js
+    const paqueteDatos = {
+      id_pedido: `PED-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      fecha_recogida: fecha, // El estado que creamos con el carrusel
+      proposito: proposito,
+      solicitante: integrantes[0].matricula, // El líder del equipo (el primer elemento)
+      integrantes: integrantes,
+      materiales: materiales
     };
 
-    const historial = JSON.parse(localStorage.getItem('historial_pedidos_safe')) || [];
-    localStorage.setItem('historial_pedidos_safe', JSON.stringify([nuevoPedido, ...historial]));
+    try {
+      // 2. Lanzamos el paquete hacia la ventanilla 4 de Node.js
+      const respuesta = await fetch('http://localhost:5000/api/pedidos', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(paqueteDatos)
+      });
 
-    alert("¡Solicitud enviada de forma exitosa!");
-    localStorage.removeItem('solicitud_materiales_safe');
-    navigate('/pedidos');
+      const datosServidor = await respuesta.json();
+
+      // 3. Revisamos si la base de datos nos dio luz verde
+      if (datosServidor.status === "success") {
+        alert("¡Solicitud registrada oficialmente en SafeStock!");
+        localStorage.removeItem('solicitud_materiales_safe'); // Limpiamos el carrito
+        navigate('/pedidos'); // Lo mandamos a la pantalla de historial
+      } else {
+        // Si el backend se queja por algo
+        alert("Hubo un problema: " + datosServidor.message);
+      }
+
+    } catch (error) {
+      console.error("Error de conexión:", error);
+      alert("Error al conectar con el servidor. Revisa que Node.js esté encendido.");
+    }
   };
+  
 
   const totalUnidades = materiales.reduce((acc, curr) => acc + curr.cantidad, 0);
 
@@ -93,16 +178,37 @@ const Solicitud = () => {
             </p>
           </div>
 
-
+          {/* --- SECCIÓN DE FECHA MODIFICADA --- */}
           <section className="mb-8">
             <h3 className="text-slate-500 text-[10px] font-black uppercase tracking-widest mb-3">Fecha de recogida *</h3>
             <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-              <input type="text" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full max-w-md bg-white border border-slate-200 rounded-xl py-2.5 px-4 text-xs font-bold text-slate-800 outline-none shadow-sm focus:border-blue-500" />
-              <div className="flex gap-1.5 text-[10px] font-black">
-                <button type="button" className="px-3 py-1.5 text-slate-300 bg-slate-50 rounded-xl cursor-not-allowed">Hoy (mar 18)</button>
-                <button type="button" onClick={() => setFecha('Miércoles 19 de marzo, 2025')} className={`px-4 py-1.5 rounded-xl transition-colors ${fecha === 'Miércoles 19 de marzo, 2025' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>Mié 19 ✓</button>
-                <button type="button" onClick={() => setFecha('Jueves 20 de marzo, 2025')} className={`px-4 py-1.5 rounded-xl transition-colors ${fecha === 'Jueves 20 de marzo, 2025' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>Jue 20</button>
-                <button type="button" onClick={() => setFecha('Viernes 21 de marzo, 2025')} className={`px-4 py-1.5 rounded-xl transition-colors ${fecha === 'Viernes 21 de marzo, 2025' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>Vie 21</button>
+              <input 
+                type="text" 
+                value={fecha} 
+                readOnly // Evitamos que escriban cosas raras, solo lectura
+                className="w-full max-w-md bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 text-xs font-bold text-slate-800 outline-none shadow-inner" 
+              />
+              
+              {/* RENDERIZADO DINÁMICO DE BOTONES (AHORA CON SCROLL HORIZONTAL) */}
+              <div className="flex gap-2 text-[10px] font-black overflow-x-auto pb-2 w-full scroll-smooth">
+                {opcionesFechas.map((f) => (
+                  <button 
+                    key={f.id}
+                    type="button" 
+                    disabled={f.esHoy} 
+                    onClick={() => setFecha(f.valorLargo)} 
+                    // shrink-0 es la magia que evita que el botón se aplaste al haber muchos
+                    className={`shrink-0 px-4 py-2 rounded-xl transition-all ${
+                      f.esHoy 
+                        ? 'text-slate-300 bg-slate-50 cursor-not-allowed border border-slate-100' 
+                        : fecha === f.valorLargo 
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' 
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {f.esHoy ? `Hoy` : f.etiquetaBoton} {fecha === f.valorLargo && !f.esHoy && '✓'}
+                  </button>
+                ))}
               </div>
             </div>
           </section>
@@ -139,7 +245,7 @@ const Solicitud = () => {
                   {integrantes.map((integ) => (
                     <div key={integ.id} className="flex items-center justify-between p-3.5 border-b border-slate-100 last:border-0">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-[10px]">{integ.nombre.substring(0,2).toUpperCase()}</div>
+                        <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-[10px]">{integrantes.nombre ? integrantes.nombre.substring(0, 2).toUpperCase() : 'XX'}</div>
                         <div>
                           <p className="font-bold text-[#1a1f2e]">{integ.nombre} {integ.id === 1 && <span className="text-[10px] text-slate-400 font-normal">· Tú (solicitante)</span>}</p>
                           <p className="text-[10px] text-slate-400 font-mono">{integ.matricula}</p>
@@ -162,7 +268,6 @@ const Solicitud = () => {
             )}
           </AnimatePresence>
 
-          {/* Propósito */}
           <section className="mb-8">
              <h3 className="text-slate-500 text-[10px] font-black uppercase tracking-widest mb-3">Propósito / Proyecto *</h3>
              <input type="text" value={proposito} onChange={(e) => setProposito(e.target.value)} className="w-full bg-slate-50 border border-slate-100 rounded-xl p-4 text-xs font-medium outline-none text-slate-800" />
@@ -174,7 +279,6 @@ const Solicitud = () => {
           <p className="w-full text-center text-[10px] text-slate-400 mt-2">Al enviar, el almacenista revisará y confirmará tu pedido</p>
         </div>
 
-        {/* COLUMNA DERECHA: RESUMEN EXACTO DE TU FOTO */}
         <aside className="w-full lg:w-95 text-left shrink-0">
           <div className="bg-white rounded-4xl p-6 border border-slate-100 sticky top-24 shadow-sm">
             <h2 className="text-sm font-black text-[#1a1f2e] uppercase tracking-tight mb-6">Resumen del pedido</h2>

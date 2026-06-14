@@ -16,9 +16,11 @@ const Login = () => {
     setErrorMessage('');
 
     try {
-      const data = await loginUser(registro, password);
+      const data = await loginUser(email, password);
 
       if (data.status === "success" || data.user) {
+        localStorage.setItem('usuario_safestock', JSON.stringify(data.user));
+
         navigate('/inicio');
       } else {
         setErrorMessage("La información es incorrecta. Por favor, verifica tus datos.");
@@ -82,13 +84,13 @@ const Login = () => {
 
               <div className="text-left">
                 <label className="block text-[11px] font-black text-slate-800 uppercase tracking-[0.15em] mb-3 text-left">
-                  Correo
+                  Correo Institucional
                 </label>
                 <input 
                   type="text" 
                   required
                   placeholder="ej. 19100412@ceti.mx" 
-                  value={correo}
+                  value={email}
                   onChange={(e) => {
                       setEmail(e.target.value);
                       if(errorMessage) setErrorMessage('');
