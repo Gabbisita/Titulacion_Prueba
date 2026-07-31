@@ -2,60 +2,60 @@ const express = require('express');
 const db = require('./db');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
-const nodemailer = require('nodemailer');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Configuración del mensajero oficial de SafeStock
-const transporador = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: 'tu_correo_institucional@ceti.mx', // El correo que enviará los avisos
-    pass: 'xxxx xxxx xxxx xxxx' // Tu Contraseña de Aplicación de Google (16 letras)
-  }
-});
-
-// Verificación rápida en la terminal al arrancar el servidor
-transporador.verify((error, success) => {
-  if (error) {
-    console.log("Error en la configuración de correo:", error);
-  } else {
-    console.log("Servidor listo para enviar correos automáticos ✉️");
-  }
-});
-
-
-// --- VENTANILLA 1: LOGIN ---
+// --- VENTANILLA 1: LOGIN INTELIGENTE (ADMINISTRADOR Y ALUMNO) ---
 app.post('/login', (req, res) => {
     const { email, password } = req.body;
-    
-    // 1. Ahora SOLO buscamos al alumno por su correo institucional
-    const query = "SELECT * FROM alumno WHERE Email = ?";
 
-    db.query(query, [email], (err, result) => {
+    // 1. Primero buscamos si el correo es del Jefe (Administrador)
+    const queryAdmin = "SELECT * FROM administrador WHERE Email = ?";
+
+    db.query(queryAdmin, [email], (err, resultAdmin) => {
         if (err) return res.status(500).json({ error: err.message });
 
-        // Si encontramos el correo en la base de datos...
-        if (result.length > 0) {
-            const alumno = result[0]; 
+        // Si encontramos el correo en la tabla administrador
+        if (resultAdmin.length > 0) {
+            const admin = resultAdmin[0]; 
 
-            // 2. Usamos bcrypt para comparar el texto (password) con el código secreto (alumno.Password)
-            bcrypt.compare(password, alumno.Password, (err, coinciden) => {
+            bcrypt.compare(password, admin.Password, (err, coinciden) => {
                 if (err) return res.status(500).json({ error: "Error interno de seguridad" });
 
                 if (coinciden) {
-                    // ¡Las contraseñas coinciden matemáticamente! Pasa.
-                    res.status(200).json({ status: "success", user: alumno });
+                    // Pasa como ADMIN (React atrapará esto y lo mandará a /admin)
+                    return res.status(200).json({ status: "success", role: "admin", user: admin });
                 } else {
-                    // La contraseña es incorrecta
-                    res.status(401).json({ status: "error", message: "Contraseña incorrecta" });
+                    return res.status(401).json({ status: "error", message: "Contraseña incorrecta" });
                 }
             });
         } else {
-            // El correo no existe en la base de datos
-            res.status(401).json({ status: "error", message: "Correo no registrado" });
+            // 2. Si NO es administrador, entonces buscamos en la tabla de alumnos
+            const queryAlumno = "SELECT * FROM alumno WHERE Email = ?";
+            
+            db.query(queryAlumno, [email], (err, resultAlumno) => {
+                if (err) return res.status(500).json({ error: err.message });
+
+                if (resultAlumno.length > 0) {
+                    const alumno = resultAlumno[0]; 
+
+                    bcrypt.compare(password, alumno.Password, (err, coinciden) => {
+                        if (err) return res.status(500).json({ error: "Error interno de seguridad" });
+
+                        if (coinciden) {
+                            // Pasa como ALUMNO (React lo mandará a /inicio)
+                            return res.status(200).json({ status: "success", role: "alumno", user: alumno });
+                        } else {
+                            return res.status(401).json({ status: "error", message: "Contraseña incorrecta" });
+                        }
+                    });
+                } else {
+                    // Si no está en NINGUNA de las dos tablas
+                    return res.status(401).json({ status: "error", message: "Correo no registrado" });
+                }
+            });
         }
     });
 });
@@ -72,14 +72,14 @@ app.get('/api/materiales', (req, res) => {
 
 // --- VENTANILLA 3: DETALLES DE UN SOLO MATERIAL ---
 app.get('/api/materiales/:id', (req, res) => {
-    const idMaterial = req.params.id; // Agarramos el ID que viene en la URL
+    const idMaterial = req.params.id; 
     const query = 'SELECT * FROM material WHERE ID_Material = ?';
 
     db.query(query, [idMaterial], (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
         
         if (result.length > 0) {
-            res.status(200).json(result[0]); // Mandamos el material encontrado
+            res.status(200).json(result[0]); 
         } else {
             res.status(404).json({ message: "Material no encontrado" });
         }
@@ -88,10 +88,8 @@ app.get('/api/materiales/:id', (req, res) => {
 
 // --- VENTANILLA DE REGISTRO ---
 app.post('/registro', (req, res) => {
-    // 1. Atrapamos todos los datos que nos mandó React
     const { nombre, registro_alu, email, password, telefono, carrera_texto, semestre_texto } = req.body;
 
-    // --- FILTRO DE DOMINIO ---
     if (!email.endsWith('@ceti.mx')) {
         return res.status(400).json({ 
             status: "error", 
@@ -99,13 +97,10 @@ app.post('/registro', (req, res) => {
         });
     }
 
-    // --- SEGURIDAD: Encriptar la contraseña ---
     const saltRounds = 10;
     bcrypt.hash(password, saltRounds, (err, hashPassword) => {
         if (err) return res.status(500).json({ error: "Error al encriptar" });
 
-        // 2. LA MAGIA DEL TRADUCTOR (Subconsultas)
-        // Usamos (SELECT ...) para que MySQL convierta el texto en ID automáticamente
         const query = `
             INSERT INTO alumno (Nombre, Registro_Alu, Email, Password, Telefono, FK_Carrera, FK_Semestre) 
             VALUES (
@@ -119,14 +114,11 @@ app.post('/registro', (req, res) => {
             )
         `;
 
-        // 3. Inyectamos las variables en orden
         db.query(query, [nombre, registro_alu, email, hashPassword, telefono, carrera_texto, semestre_texto], (err, result) => {
             if (err) {
-                // Si intentan usar el mismo correo o matrícula
                 if (err.code === 'ER_DUP_ENTRY') {
                     return res.status(400).json({ status: "error", message: "Este alumno o correo ya está registrado." });
                 }
-                // Si mandan una carrera que no existe en la base de datos
                 if (err.code === 'ER_BAD_NULL_ERROR') {
                     return res.status(400).json({ status: "error", message: "Error: La carrera o semestre seleccionados no son válidos." });
                 }
@@ -138,39 +130,35 @@ app.post('/registro', (req, res) => {
     });
 });
 
-// --- VENTANILLA 4: REGISTRAR UN PEDIDO (CON ESCUDO ANTIDUPLICADOS) ---
+// --- VENTANILLA 4: REGISTRAR UN PEDIDO (CORREGIDO PARA EQUIPOS) ---
 app.post('/api/pedidos', (req, res) => {
     const { id_pedido, fecha_recogida, proposito, solicitante, integrantes, materiales } = req.body;
 
-    // 1. Extraemos solo las matrículas de los integrantes para la consulta SQL
     const listaMatriculas = integrantes.map(i => i.matricula);
 
-    // 2. Consulta de control: Cruzamos equipo_pedido con pedido y usuario
     const queryValidar = `
         SELECT ep.FK_Matricula, u.Nombre 
         FROM equipo_pedido ep
         JOIN pedido p ON ep.FK_Pedido = p.ID_Pedido
-        JOIN usuario u ON ep.FK_Matricula = u.Registro_Alu
+        JOIN alumno u ON ep.FK_Matricula = u.Registro_Alu
         WHERE p.Fecha_Recogida = ? AND ep.FK_Matricula IN (?);
     `;
 
-    // 3. Ejecutamos la inspección antes de registrar nada
-    db.query(queryValidar, [fecha_recogida, [listaMatriculas]], (err, duplicados) => {
+    // SOLUCIÓN 1: Quitamos los corchetes extra alrededor de listaMatriculas
+    db.query(queryValidar, [fecha_recogida, listaMatriculas], (err, duplicados) => {
         if (err) {
-            console.error("Error al validar duplicados:", err);
+            console.error("Error SQL en validación:", err);
             return res.status(500).json({ status: "error", message: "Error interno al verificar el equipo." });
         }
 
-        // ¡ALERTA! Si la consulta regresa filas, significa que alguien ya está ocupado
         if (duplicados.length > 0) {
             const alumnoConflictivo = duplicados[0].Nombre;
             return res.status(400).json({ 
                 status: "error", 
-                message: `${alumnoConflictivo} ya tiene una solicitud de material registrada para esta misma fecha. Coordínate con tu equipo.` 
+                message: `${alumnoConflictivo} ya tiene una solicitud de material registrada para esta misma fecha.` 
             });
         }
 
-        // 4. SI PASA EL ESCUDO, SE PROCEDE A GUARDAR EL PEDIDO (Tu código base de inserción)
         const queryPedido = `
             INSERT INTO pedido (ID_Pedido, Fecha_Solicitud, Fecha_Recogida, Proposito, FK_Solicitante, FK_Estado) 
             VALUES (?, NOW(), ?, ?, ?, 1);
@@ -182,9 +170,19 @@ app.post('/api/pedidos', (req, res) => {
                 return res.status(500).json({ status: "error", message: "Error al registrar la cabecera del pedido." });
             }
 
-            // Inserción de los integrantes en equipo_pedido
-            const queryDetalle = `INSERT INTO detalle_pedido (FK_Pedido, FK_Material, Cantidad) VALUES ?`;
-            const valoresDetalles = materiales.map(m => [id_pedido, m.id, m.cantidad]);
+            const queryEquipo = `INSERT INTO equipo_pedido (FK_Pedido, FK_Matricula, Rol) VALUES ?`;
+            const valoresEquipo = integrantes.map(i => [
+                id_pedido, 
+                i.matricula, 
+                i.matricula === solicitante ? 'Líder' : 'Colaborador'
+            ]);
+
+            db.query(queryEquipo, [valoresEquipo], (err) => {
+                if (err) console.error("Error menor al guardar equipo:", err);
+
+                // Finalmente insertamos las herramientas
+                const queryDetalle = `INSERT INTO detalle_pedido (FK_Pedido, FK_Material, Cantidad) VALUES ?`;
+                const valoresDetalles = materiales.map(m => [id_pedido, m.id, m.cantidad]);
 
                 db.query(queryDetalle, [valoresDetalles], (err) => {
                     if (err) {
@@ -192,54 +190,17 @@ app.post('/api/pedidos', (req, res) => {
                         return res.status(500).json({ status: "error", message: "Error al registrar los materiales." });
                     }
 
-                    // --- NUEVA LÓGICA: BUSCAR CORREOS Y NOTIFICAR AL EQUIPO ---
-                    // Buscamos los correos de todos los integrantes involucrados
-                    const queryCorreos = `SELECT Correo, Nombre FROM usuario WHERE Registro_Alu IN (?);`;
-                    
-                    db.query(queryCorreos, [listaMatriculas], (err, usuarios) => {
-                        if (!err && usuarios.length > 0) {
-                            
-                            // Enviamos un correo individual a cada miembro del equipo
-                            usuarios.forEach(usuario => {
-                                const opcionesCorreo = {
-                                    from: '"SafeStock CETI" <tu_correo_institucional@ceti.mx>',
-                                    to: usuario.Correo,
-                                    subject: `🚨 Notificación de Préstamo - Folio: ${id_pedido}`,
-                                    html: `
-                                        <div style="font-family: sans-serif; padding: 20px; color: #334155;">
-                                            <h2 style="color: #1e3a8a;">¡Hola, ${usuario.Nombre}!</h2>
-                                            <p>Te informamos que has sido incluido en una nueva solicitud de préstamo de materiales en la plataforma <strong>SafeStock</strong>.</p>
-                                            <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
-                                            <p><strong>Detalles del Vale:</strong></p>
-                                            <ul>
-                                                <li><strong>Folio de Pedido:</strong> ${id_pedido}</li>
-                                                <li><strong>Fecha Programada de Recogida:</strong> ${fecha_recogida}</li>
-                                                <li><strong>Propósito:</strong> "${proposito}"</li>
-                                            </ul>
-                                            <p style="font-size: 12px; color: #94a3b8; margin-top: 30px;">Si consideras que esto es un error o no autorizaste el uso de tu matrícula, acude inmediatamente a la ventanilla del almacén de electrónica.</p>
-                                        </div>
-                                    `
-                                };
-
-                                transporador.sendMail(opcionesCorreo, (errorMail, info) => {
-                                    if (errorMail) console.error("Error al enviar a " + usuario.Correo, errorMail);
-                                });
-                            });
-                        }
-                    });
-
-                    // Éxito absoluto: Respondemos a React inmediatamente sin esperar a que terminen de salir todos los correos
-                    res.status(200).json({ status: "success", message: "Pedido procesado y equipo notificado por correo." });
+                    res.status(200).json({ status: "success", message: "Pedido de equipo procesado con éxito." });
                 });
             });
         });
+    });
 });
 
 // --- VENTANILLA 5: OBTENER HISTORIAL DE PEDIDOS ---
 app.get('/api/mis-pedidos/:matricula', (req, res) => {
     const matricula = req.params.matricula;
 
-    // Juntamos 5 tablas y usamos GROUP_CONCAT para hacer una lista separada por comas
     const queryHistorial = `
         SELECT 
             p.ID_Pedido, 
@@ -268,7 +229,78 @@ app.get('/api/mis-pedidos/:matricula', (req, res) => {
     });
 });
 
+// --- VENTANILLA 5: OBTENER PEDIDOS PENDIENTES PARA EL ADMIN ---
+app.get('/api/admin/pedidos', (req, res) => {
+    // Asumimos que FK_Estado = 1 significa "Pendiente"
+    const queryPedidos = `
+        SELECT ID_Pedido, Fecha_Recogida, Proposito 
+        FROM pedido 
+        WHERE FK_Estado = 1 
+        ORDER BY Fecha_Recogida ASC;
+    `;
 
+    db.query(queryPedidos, (err, pedidosDb) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        // Si no hay pedidos, regresamos un arreglo vacío rápido
+        if (pedidosDb.length === 0) return res.status(200).json([]);
+
+        const idsPedidos = pedidosDb.map(p => p.ID_Pedido);
+
+        // Extraemos a todos los integrantes de todos los pedidos encontrados
+        const queryEquipo = `
+            SELECT ep.FK_Pedido, ep.FK_Matricula, a.Nombre, ep.Rol 
+            FROM equipo_pedido ep 
+            JOIN alumno a ON ep.FK_Matricula = a.Registro_Alu 
+            WHERE ep.FK_Pedido IN (?)
+        `;
+
+        // Extraemos todas las herramientas de esos pedidos
+        const queryMateriales = `
+            SELECT dp.FK_Pedido, m.Nombre, dp.Cantidad 
+            FROM detalle_pedido dp 
+            JOIN material m ON dp.FK_Material = m.ID_Material 
+            WHERE dp.FK_Pedido IN (?)
+        `;
+
+        db.query(queryEquipo, [idsPedidos], (err, equipoDb) => {
+            if (err) return res.status(500).json({ error: err.message });
+
+            db.query(queryMateriales, [idsPedidos], (err, materialesDb) => {
+                if (err) return res.status(500).json({ error: err.message });
+
+                // Armamos el rompecabezas para que el JSON quede exactamente como lo pide React
+                const pedidosArmados = pedidosDb.map(pedido => {
+                    const integrantes = equipoDb.filter(e => e.FK_Pedido === pedido.ID_Pedido);
+                    const lider = integrantes.find(e => e.Rol === 'Líder') || integrantes[0];
+                    const colaboradores = integrantes.filter(e => e.Rol !== 'Líder');
+                    const materiales = materialesDb.filter(m => m.FK_Pedido === pedido.ID_Pedido);
+
+                    // Damos formato a la fecha
+                    const fechaObj = new Date(pedido.Fecha_Recogida);
+                    const opcionesFecha = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+                    let fechaBonita = fechaObj.toLocaleDateString('es-ES', opcionesFecha);
+                    fechaBonita = fechaBonita.charAt(0).toUpperCase() + fechaBonita.slice(1);
+
+                    return {
+                        id: pedido.ID_Pedido,
+                        fecha_recogida: fechaBonita,
+                        esEquipo: colaboradores.length > 0,
+                        solicitante: { 
+                            matricula: lider ? lider.FK_Matricula : 'N/A', 
+                            nombre: lider ? lider.Nombre : 'Desconocido' 
+                        },
+                        equipo: colaboradores.map(c => ({ matricula: c.FK_Matricula, nombre: c.Nombre })),
+                        proposito: pedido.Proposito,
+                        materiales: materiales.map(m => ({ nombre: m.Nombre, cantidad: m.Cantidad }))
+                    };
+                });
+
+                res.status(200).json(pedidosArmados);
+            });
+        });
+    });
+});
 
 // --- ENCENDIDO DEL SERVIDOR ---
 app.listen(5000, () => {

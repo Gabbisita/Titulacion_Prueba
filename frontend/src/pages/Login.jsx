@@ -18,10 +18,18 @@ const Login = () => {
     try {
       const data = await loginUser(email, password);
 
+      console.log("Respuesta secreta del backend:", data);
+
       if (data.status === "success" || data.user) {
         localStorage.setItem('usuario_safestock', JSON.stringify(data.user));
+        localStorage.setItem('rol_safestock', data.role || 'alumno');
 
-        navigate('/inicio');
+
+        if (data.role === 'admin'){
+          navigate('/inicioadmin');
+        } else{
+          navigate('/Inicio')
+        }
       } else {
         setErrorMessage("La información es incorrecta. Por favor, verifica tus datos.");
         setEmail('');    

@@ -10,7 +10,9 @@ import Solicitud from './pages/Solicitud';
 import Pedidos from './pages/Pedidos';
 import DetallePedido from './pages/DetallePedido';
 import Registro from './pages/Registro';
-import Carrito from './components/Carrito'; 
+import Carrito from './components/Carrito';
+import InicioAdmin from './pages/InicioAdmin';
+import PedidosAdmin from './pages/PedidosAdmin'; 
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -34,6 +36,8 @@ function App() {
         <Route path="/pedidos" element={<Pedidos />} />
         <Route path="/pedido/:id" element={<DetallePedido />} />
         <Route path="/registro" element={<Registro />} />
+        <Route path="/inicioadmin" element={<InicioAdmin/>}/>
+        <Route path="/pedidosadmin" element={<PedidosAdmin/>}/>
       </Routes>
     </Router>
   );

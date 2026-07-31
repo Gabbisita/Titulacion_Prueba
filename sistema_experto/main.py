@@ -1,6 +1,6 @@
-from fastapi import FastAPI
-import mysql.connector
+from fastapi import FastAPI, Request, Query, Response
 from fastapi.responses import JSONResponse
+import mysql.connector
 import os
 import json
 import google.generativeai as genai
@@ -15,7 +15,7 @@ modelo_ia = genai.GenerativeModel('gemini-2.5-flash')
 
 app = FastAPI()
 
-# Configuracion de conexion a TiDB (Reemplaza con tus datos reales)
+# Configuracion de conexion a TiDB
 db_config = {
     "host": "gateway01.us-east-1.prod.aws.tidbcloud.com",
     "user": "4HBSXKLUs96dsK7.root",
@@ -23,6 +23,8 @@ db_config = {
     "database": "almacen_electronica",
     "port": 4000
 }
+
+# --- RUTAS DE PRUEBA Y CONEXIÓN ---
 
 @app.get("/")
 def raiz():
@@ -37,12 +39,13 @@ def probar_conexion():
             return {"status": "success", "mensaje": "Conexion a TiDB establecida correctamente."}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "mensaje": str(e)})
-    
+
+# --- RUTAS DE LOS AGENTES DEL SISTEMA EXPERTO ---
+
 @app.get("/agente_inferencia/{id_pedido}")
 def agente_evaluador(id_pedido: str):
     try:
         conexion = mysql.connector.connect(**db_config)
-        # dictionary=True hace que los resultados salgan con los nombres de las columnas, más fácil de leer
         cursor = conexion.cursor(dictionary=True) 
 
         # 1. Leemos el pedido y cruzamos con el stock actual en TiDB
@@ -64,7 +67,6 @@ def agente_evaluador(id_pedido: str):
 
         # 3. MOTOR DE INFERENCIA: Evaluamos las reglas lógicas (Forward Chaining)
         for item in materiales_solicitados:
-            # REGLA 1: IF cantidad > stock THEN Rechazar
             if item['Pedida'] > item['Stock']:
                 estado_final = "Rechazado_Infraccion"
                 razonamiento.append(f"ALERTA: Se solicitaron {item['Pedida']}x '{item['Nombre']}', pero el stock actual es de {item['Stock']}.")
@@ -87,7 +89,6 @@ def agente_evaluador(id_pedido: str):
 @app.get("/agente_nlp/{mensaje}")
 def agente_atencion(mensaje: str):
     try:
-        # Aquí le damos la instrucción estricta a la IA (Ingeniería de Prompts)
         instruccion = f"""
         Eres el Agente 1 del sistema experto de almacén escolar 'SafeStock'. 
         Tu trabajo es leer el mensaje del alumno y extraer los materiales que necesita.
@@ -97,20 +98,14 @@ def agente_atencion(mensaje: str):
         Mensaje del alumno: "{mensaje}"
         """
         
-        # Mandamos el mensaje al cerebro de Gemini
         respuesta = modelo_ia.generate_content(instruccion)
-        
-        # Limpiamos el texto por si la IA le pone comillas raras o formato de código
         texto_limpio = respuesta.text.replace('```json', '').replace('```', '').strip()
-        
-        # Convertimos el texto a un diccionario de Python
         datos_extraidos = json.loads(texto_limpio)
         
         return {"status": "success", "agente_1_extraccion": datos_extraidos}
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "mensaje": str(e)})
-    
 
 @app.get("/procesar_chat/{mensaje}")
 def procesar_mensaje_completo(mensaje: str):
@@ -138,12 +133,10 @@ def procesar_mensaje_completo(mensaje: str):
         estado_final = "Aprobado"
         razonamiento = []
 
-        # Revisamos el stock material por material
         for item in materiales_solicitados:
             nombre_buscado = item["nombre"]
             cantidad_pedida = item["cantidad"]
 
-            # Buscamos coincidencias de texto en la base de datos (Ej. "arduino" busca "%arduino%")
             query = "SELECT Nombre, Cantidad AS Stock FROM material WHERE LOWER(Nombre) LIKE LOWER(%s) LIMIT 1"
             cursor.execute(query, (f"%{nombre_buscado}%",))
             resultado_db = cursor.fetchone()
@@ -156,7 +149,6 @@ def procesar_mensaje_completo(mensaje: str):
                 stock_real = resultado_db['Stock']
                 nombre_oficial = resultado_db['Nombre']
                 
-                # REGLA LÓGICA: IF pedida > stock THEN rechazar
                 if cantidad_pedida > stock_real:
                     estado_final = "Rechazado_Infraccion"
                     razonamiento.append(f" ALERTA: Pediste {cantidad_pedida}x de '{nombre_oficial}', pero solo quedan {stock_real} en almacén.")
@@ -166,12 +158,42 @@ def procesar_mensaje_completo(mensaje: str):
         cursor.close()
         conexion.close()
 
-        # Retornamos el diagnóstico completo
         return {
             "mensaje_original": mensaje,
             "decision_final": estado_final,
             "analisis_detallado": razonamiento
         }
 
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "mensaje": str(e)})
+
+# --- CONEXIÓN A WHATSAPP (WEBHOOKS) ---
+
+# Token secreto para validar con Meta
+TOKEN_VERIFICACION = "safestock_secreto_123"
+
+# 1. RUTA DE VERIFICACIÓN (Meta la usa para validar tu servidor)
+@app.get("/webhook")
+def verificar_webhook(
+    mode: str = Query(None, alias="hub.mode"),
+    token: str = Query(None, alias="hub.verify_token"),
+    challenge: str = Query(None, alias="hub.challenge")
+):
+    if mode == "subscribe" and token == TOKEN_VERIFICACION:
+        return Response(content=challenge, media_type="text/plain")
+    return JSONResponse(status_code=403, content={"status": "error", "mensaje": "Token inválido"})
+
+# 2. RUTA DE RECEPCIÓN (Aquí llegarán los mensajes reales de WhatsApp)
+@app.post("/webhook")
+async def recibir_mensaje_whatsapp(request: Request):
+    try:
+        body = await request.json()
+        
+        # Imprimimos en la terminal todo lo que mande WhatsApp
+        print("\n=== ¡NUEVO MENSAJE DESDE WHATSAPP! ===")
+        print(json.dumps(body, indent=2))
+        print("=======================================\n")
+        
+        return {"status": "success"}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "mensaje": str(e)})
