@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'; // <-- IMPORTANTE: Agregar useEffect
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
@@ -9,20 +9,15 @@ const Inventario = () => {
   const [cat, setCat] = useState('Todas');
   const [est, setEst] = useState('Todos');
   
-  // 1. Iniciamos el inventario como un arreglo vacío
   const [materiales, setMateriales] = useState([]);
 
-  // 2. Usamos useEffect para ir a buscar los datos a tu servidor Node.js
   useEffect(() => {
     const obtenerMateriales = async () => {
       try {
         const response = await fetch('http://localhost:5000/api/materiales');
         const data = await response.json();
 
-        // 3. Traducimos los datos de tu Base de Datos al formato de Kenya
         const inventarioReal = data.map((item) => {
-          
-          // Calculamos la categoría basada en tu número (FK)
           let categoriaTexto = 'Otros';
           if (item.FK_No_Categoria === 1) categoriaTexto = 'Electrónica';
           if (item.FK_No_Categoria === 2) categoriaTexto = 'Mecánica';
@@ -31,15 +26,14 @@ const Inventario = () => {
 
           return {
             id: item.ID_Material,
-            n: item.Nombre, // El nombre del material
-            d: item.Cantidad, // El stock disponible
-            c: categoriaTexto, // La categoría en texto
-            e: item.Cantidad > 0 ? 'EN STOCK' : 'AGOTADO', // Calculamos el estado en vivo
-            i: `/images/${item.ID_Material}.jpg` // Opción A: La ruta de la imagen local
+            n: item.Nombre, 
+            d: item.Cantidad, 
+            c: categoriaTexto, 
+            e: item.Cantidad > 0 ? 'EN STOCK' : 'AGOTADO', 
+            i: `/images/${item.ID_Material}.jpg` 
           };
         });
 
-        // 4. Guardamos los datos reales en el estado para que React dibuje la página
         setMateriales(inventarioReal);
 
       } catch (error) {
@@ -47,10 +41,39 @@ const Inventario = () => {
       }
     };
 
-    obtenerMateriales(); // Ejecutamos la función
-  }, []); // Los corchetes vacíos significan que solo se ejecuta 1 vez al abrir la página
+    obtenerMateriales(); 
+  }, []); 
 
-  // --- De aquí para abajo el código de Kenya se queda EXACTAMENTE IGUAL ---
+  // --- NUEVA FUNCIÓN: Agregar rápido sin salir de la página ---
+  const agregarRapidoAlCarrito = (e, m) => {
+    e.stopPropagation(); // Evita que se abra la página de detalles
+    e.preventDefault();
+
+    const guardados = localStorage.getItem('solicitud_materiales_safe');
+    let carrito = guardados ? JSON.parse(guardados) : [];
+    const index = carrito.findIndex(item => item.id === m.id);
+
+    if (index !== -1) {
+      if (carrito[index].cantidad < m.d){
+        carrito[index].cantidad += 1;
+      }else{
+        alert(`Solo hay ${m.d} unidades disponibles de este material.`);
+        return;
+      }
+    } else {
+      carrito.push({
+        id: m.id,
+        n: m.n,
+        codigo: `EL-00${m.id}`,
+        cantidad: 1
+      });
+    }
+
+    localStorage.setItem('solicitud_materiales_safe', JSON.stringify(carrito));
+    
+    // Opcional: Una pequeña alerta nativa, aunque el Navbar se actualizará solo
+    // alert(`Agregaste 1x ${m.n} al carrito`);
+  };
 
   const filtrados = materiales.filter(m => 
     (cat === 'Todas' || m.c === cat) && (est === 'Todos' || m.e === est)
@@ -103,11 +126,12 @@ const Inventario = () => {
                 whileTap={{ scale: 0.98 }}
                 transition={{ duration: 0.3 }}
                 onClick={() => navigate(`/material/${m.id}`)}
-                className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col items-center text-center group transition-all cursor-pointer"
+                className="bg-white p-6 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col items-center text-center group transition-all cursor-pointer"
               >
-                <div className="bg-slate-50 w-full aspect-square rounded-[2.5rem] flex items-center justify-center text-6xl mb-8 shadow-inner group-hover:bg-blue-50 transition-colors overflow-hidden">
+                <div className="bg-slate-50 w-full aspect-square rounded-[2.5rem] flex items-center justify-center text-6xl mb-6 shadow-inner group-hover:bg-blue-50 transition-colors overflow-hidden">
                   {renderVisual(m.i)}
                 </div>
+                
                 <div className="flex-1 w-full text-center">
                   <span className="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em] mb-2 block">
                     {m.c}
@@ -115,12 +139,29 @@ const Inventario = () => {
                   <h3 className="text-[#1a1f2e] font-black text-xl mb-2 uppercase tracking-tight italic leading-tight min-h-12 flex items-center justify-center">
                     {m.n}
                   </h3>
-                  <p className="text-slate-400 font-bold text-xs mb-6">{m.d} disponibles</p>
+                  <p className="text-slate-400 font-bold text-xs mb-4">{m.d} disponibles</p>
                 </div>
-                <span className={`px-6 py-2 rounded-full text-[10px] font-black tracking-widest ${
-                  m.e === 'EN STOCK' ? 'bg-green-100 text-green-700' : 
-                  m.e === 'AGOTADO' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-800'
-                }`}>{m.e}</span>
+                
+                {/* --- SECCIÓN INFERIOR MODIFICADA (Letrero + Botón Carrito) --- */}
+                <div className="flex items-center justify-between w-full mt-auto px-2">
+                  <span className={`px-4 py-2 rounded-full text-[10px] font-black tracking-widest ${
+                    m.e === 'EN STOCK' ? 'bg-green-100 text-green-700' : 
+                    m.e === 'AGOTADO' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-800'
+                  }`}>
+                    {m.e}
+                  </span>
+
+                  {/* Solo mostramos el carrito si hay stock */}
+                  {m.e === 'EN STOCK' && (
+                    <button 
+                      onClick={(e) => agregarRapidoAlCarrito(e, m)}
+                      className="w-10 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-full flex items-center justify-center text-lg shadow-md hover:scale-110 active:scale-95 transition-all"
+                      title="Agregar 1 unidad al carrito"
+                    >
+                      🛒
+                    </button>
+                  )}
+                </div>
               </motion.div>
             ))}
           </AnimatePresence>

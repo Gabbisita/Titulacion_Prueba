@@ -50,14 +50,31 @@ const PedidosAdmin = () => {
     setModalAbierto(true);
   };
 
-  const confirmarRechazo = () => {
+const confirmarRechazo = async () => {
     if (!motivoRechazo.trim()) {
       alert("Debes escribir un motivo para rechazar el pedido.");
       return;
     }
-    // Aquí iría la petición POST al backend para actualizar el estado a "Rechazado" (Futura implementación)
-    setPedidos(pedidos.filter(p => p.id !== pedidoSeleccionado));
-    setModalAbierto(false);
+
+    try {
+      const respuesta = await fetch(`http://localhost:5000/api/admin/pedidos/${pedidoSeleccionado}/rechazar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        // Mandamos el motivo por si en el futuro decides crear una columna "Notas" en tu tabla pedido
+        body: JSON.stringify({ motivo: motivoRechazo }) 
+      });
+
+      if (respuesta.ok) {
+        // Solo si la base de datos confirmó el cambio, lo quitamos de la pantalla
+        setPedidos(pedidos.filter(p => p.id !== pedidoSeleccionado));
+        setModalAbierto(false);
+      } else {
+        alert("Hubo un error al intentar rechazar el pedido en la base de datos.");
+      }
+    } catch (error) {
+      console.error("Error de conexión:", error);
+      alert("Error al conectar con el servidor.");
+    }
   };
 
   return (

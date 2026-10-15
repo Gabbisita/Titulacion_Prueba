@@ -2,18 +2,14 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import AnimatedPage from '../components/AnimatedPage';
 
-// Eliminamos los imports de imágenes locales porque ahora usaremos las de la carpeta public/images
-
 const DetalleMaterial = () => {
   const navigate = useNavigate();
   const { id } = useParams(); 
   const [cantidad, setCantidad] = useState(1);
   const [material, setMaterial] = useState(null);
   
-  // NUEVO: Estado para saber si seguimos esperando al servidor
   const [cargando, setCargando] = useState(true);
 
-  // NUEVO: El Efecto que va al backend por los datos reales
   useEffect(() => {
     const obtenerMaterial = async () => {
       try {
@@ -22,21 +18,19 @@ const DetalleMaterial = () => {
         if (response.ok) {
           const item = await response.json();
           
-          // Calculamos la categoría de texto según tu llave foránea
           let categoriaTexto = 'Otros';
           if (item.FK_No_Categoria === 1) categoriaTexto = 'Electrónica';
           if (item.FK_No_Categoria === 2) categoriaTexto = 'Mecánica';
           if (item.FK_No_Categoria === 3) categoriaTexto = 'Consumibles';
           if (item.FK_No_Categoria === 4) categoriaTexto = 'Equipos';
 
-          // EL TRADUCTOR: Transformamos los datos de TiDB al formato de Kenya
           const materialTraducido = {
             id: item.ID_Material,
             n: item.Nombre,
             d: item.Cantidad,
             e: item.Cantidad > 0 ? 'EN STOCK' : 'AGOTADO',
             c: categoriaTexto,
-            i: `/images/${item.ID_Material}.jpg`, // Ruta a la imagen local
+            i: `/images/${item.ID_Material}.jpg`, 
             desc: item.Descripcion || 'Equipo disponible en los laboratorios de mecatrónica.'
           };
 
@@ -47,15 +41,15 @@ const DetalleMaterial = () => {
       } catch (error) {
         console.error("Error conectando con el servidor de Node:", error);
       } finally {
-        setCargando(false); // Apagamos la pantalla de carga
+        setCargando(false); 
       }
     };
 
     obtenerMaterial();
   }, [id]);
 
-  // Esta función se queda idéntica, la lógica del carrito de Kenya es excelente
-  const agregarASolicitudDirecta = () => {
+  // --- FUNCIÓN MODIFICADA: Ahora guarda en el carrito y regresa al inventario ---
+  const agregarAlCarrito = () => {
     if (!material) return;
 
     const actuales = JSON.parse(localStorage.getItem('solicitud_materiales_safe')) || [];
@@ -68,15 +62,15 @@ const DetalleMaterial = () => {
         id: material.id,
         n: material.n,
         cantidad: cantidad,
-        codigo: `EL-00${material.id}` // Esto generará códigos como EL-0030001
+        codigo: `EL-00${material.id}` 
       });
     }
 
     localStorage.setItem('solicitud_materiales_safe', JSON.stringify(actuales));
-    navigate('/solicitud'); 
+    // AQUÍ ESTÁ EL CAMBIO CLAVE: Te regresa a la página de inventario
+    navigate('/inventario'); 
   };
 
-  // NUEVO: Pantalla de carga mientras responde el servidor
   if (cargando) {
     return (
       <div className="min-h-screen bg-[#0a0f1d] flex items-center justify-center">
@@ -87,10 +81,8 @@ const DetalleMaterial = () => {
     );
   }
 
-  // Si se puso un ID inválido en la URL
   if (!material) return <div className="text-red-500 p-20 font-black italic uppercase text-center bg-[#0a0f1d] min-h-screen">Material no encontrado</div>;
 
-  // --- DE AQUÍ HACIA ABAJO EL DISEÑO DE KENYA QUEDA INTACTO ---
   return (
     <AnimatedPage>
       <div className="min-h-screen bg-[#0a0f1d] font-sans text-white p-6 md:p-12">
@@ -141,16 +133,17 @@ const DetalleMaterial = () => {
               </div>
             )}
 
+            {/* --- BOTÓN MODIFICADO --- */}
             <button 
               disabled={material.e === 'AGOTADO'}
-              onClick={agregarASolicitudDirecta}
+              onClick={agregarAlCarrito}
               className={`flex-1 font-black py-5 rounded-2xl transition-all transform active:scale-95 uppercase tracking-tight italic text-lg ${
                 material.e === 'AGOTADO' 
                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-white/5' 
                 : 'bg-[#2563eb] hover:bg-[#1d4ed8] text-white shadow-blue-900/40 shadow-2xl'
               }`}
             >
-              {material.e === 'AGOTADO' ? 'No disponible para préstamo' : 'Solicitar Préstamo Ahora'}
+              {material.e === 'AGOTADO' ? 'No disponible para préstamo' : 'AGREGAR AL CARRITO'}
             </button>
           </div>
           

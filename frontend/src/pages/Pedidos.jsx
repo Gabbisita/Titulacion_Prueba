@@ -15,7 +15,7 @@ const Pedidos = () => {
 
   useEffect(() => {
     if (!matricula) {
-      navigate('/login');
+      navigate('/');
       return;
     }
 

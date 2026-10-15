@@ -14,7 +14,41 @@ const InicioAdmin = () => {
       icono: '📥', 
       descripcion: 'Revisa, aprueba o rechaza los vales de herramientas filtrados por día.',
       ruta: '/pedidosadmin'
-    }
+    },
+    
+    { 
+      id: 'inventario', 
+      titulo: 'Inventario', 
+      icono: '📦', 
+      descripcion: 'Añade, consulta, modifica y elimina material que tenga almacenada.',
+      ruta: '/admin/inventario'
+    },
+
+    { 
+      id: 'Estadistica', 
+      titulo: 'Estadisticas', 
+      icono: '📊', 
+      descripcion: 'Consulte de forma gráfica qué materiales se piden más seguido para optimizar el inventario.',
+      ruta: '/admin/inventario'
+    },
+
+    { 
+      id: 'Casillero', 
+      titulo: 'Casilleros', 
+      icono: '🗄️', 
+      descripcion: 'Revise el estatus de los casilleros fisicos y modifique el estado segun lo necesite.',
+      ruta: '/admin/casilleros'
+    },
+
+    { 
+      id: 'usuario', 
+      titulo: 'Gestion de usuarios', 
+      icono: '👥', 
+      descripcion: 'Consulta y administra las cuentas de los alumnos registrados en el sistema.',
+      ruta: '/admin/usuarios'
+    },
+
+
   ];
 
   return (
@@ -29,9 +63,6 @@ const InicioAdmin = () => {
           <div className="relative z-10 text-left"> 
             <h1 className="text-8xl font-black italic tracking-tighter mb-6 leading-none uppercase">SAFE STOCK</h1>
             <p className="text-slate-400 text-xl max-w-md mb-10 italic">Panel de Control General · Almacenista</p>
-            <Link to="/pedidosadmin" className="bg-white text-[#0a0f1d] px-10 py-4 rounded-2xl font-black text-lg hover:scale-105 transition-transform inline-block uppercase italic">
-              Gestionar solicitudes →
-            </Link>
           </div>
         </section>
 

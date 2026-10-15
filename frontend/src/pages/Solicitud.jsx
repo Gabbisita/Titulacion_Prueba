@@ -1,63 +1,78 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence, interpolate } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import AnimatedPage from '../components/AnimatedPage';
 
 const Solicitud = () => {
   const navigate = useNavigate();
 
-// --- 1. CALCULADORA DE FECHAS DINÁMICAS (CON FILTRO DE FIN DE SEMANA) ---
+  // --- 1. CALCULADORA DE FECHAS DINÁMICAS ---
   const generarFechas = () => {
     const listaFechas = [];
     const diasCortos = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
     const diasCompletos = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
     const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
-    let diasAgregados = 0; // Cuántos días hábiles hemos guardado
-    let diasAAvanzar = 0;  // Cuántos días nos hemos movido en el calendario real
+    let diasAgregados = 0;
+    let diasAAvanzar = 0;
 
-    // Queremos generar 10 días hábiles en total (2 semanas de Lunes a Viernes)
     while (diasAgregados < 15) {
       const d = new Date();
       d.setDate(d.getDate() + diasAAvanzar);
       
-      const numeroDia = d.getDay(); // 0 es Domingo, 6 es Sábado
+      const numeroDia = d.getDay();
       
-      // FILTRO: Solo guardamos el día si NO es Domingo (0) y NO es Sábado (6)
       if (numeroDia !== 0 && numeroDia !== 6) {
         listaFechas.push({
           id: diasAAvanzar,
-          esHoy: diasAAvanzar === 0, // Bloqueamos el día de hoy por regla del almacén
+          esHoy: diasAAvanzar === 0,
           valorLargo: `${diasCompletos[numeroDia]} ${d.getDate()} de ${meses[d.getMonth()]}, ${d.getFullYear()}`,
           etiquetaBoton: `${diasCortos[numeroDia]} ${d.getDate()}`
         });
         
-        diasAgregados++; // Sumamos uno a nuestra cuenta de días hábiles
+        diasAgregados++;
       }
       
-      diasAAvanzar++; // Avanzamos un día en el calendario de todas formas
+      diasAAvanzar++;
     }
     
     return listaFechas;
   };
 
-  // Guardamos las fechas generadas en una constante para usarlas en los botones
   const opcionesFechas = generarFechas();
-  
-  // ESTADO INICIAL DINÁMICO: Por regla del CETI, se selecciona "mañana" por defecto (índice 1)
   const [fecha, setFecha] = useState(opcionesFechas[1].valorLargo);
   
+  // --- ESTADOS DE HORARIOS ---
+  const [horaRecogida, setHoraRecogida] = useState('');
+  const [horaDevolucion, setHoraDevolucion] = useState('');
+
+  const listaHoras = [
+    "7:00 am", "7:50 am", "8:40 am", "9:30 am", "10:20 am", "11:10 am",
+    "12:00 pm", "12:50 pm", "1:40 pm", "2:30 pm", "3:00 pm", "3:50 pm",
+    "4:40 pm", "5:30 pm", "6:20 pm", "7:10 pm", "8:00 pm", "8:50 pm", "9:40 pm"
+  ];
+
+  const handleCambioRecogida = (e) => {
+    const nuevaHora = e.target.value;
+    setHoraRecogida(nuevaHora);
+    
+    if (horaDevolucion) {
+      const indiceNuevaRecogida = listaHoras.indexOf(nuevaHora);
+      const indiceDevolucionActual = listaHoras.indexOf(horaDevolucion);
+      
+      if (indiceDevolucionActual <= indiceNuevaRecogida) {
+        setHoraDevolucion('');
+      }
+    }
+  };
+
   const [esEquipo, setEsEquipo] = useState(true);
   const [proposito, setProposito] = useState('...');
-  const [matriculaNueva, setMatriculaNueva] = useState('');
-  const [mostrarInputMatricula, setMostrarInputMatricula] = useState(false);
   
   const [integrantes, setIntegrantes] = useState(() => {
     const sesion = localStorage.getItem('usuario_safestock');
-
     const alumnoReal = sesion ? JSON.parse(sesion) : null;
-
     return [
       {
         id: 1,
@@ -65,13 +80,54 @@ const Solicitud = () => {
         matricula: alumnoReal ? alumnoReal.Registro_Alu : '00000000',
         rol: 'Lider'
       }
-
     ];
+  });
+
+  const [busquedaIntegrante, setBusquedaIntegrante] = useState('');
+  const [resultadosBusqueda, setResultadosBusqueda] = useState([]);
 
 
-});
+// --- NUEVA LÓGICA DEL BUSCADOR CONECTADA A MYSQL ---
+  const manejarBusquedaIntegrante = async (e) => { 
+    const texto = e.target.value;
+    setBusquedaIntegrante(texto);
 
-  // Leer materiales agregados
+    if (texto.trim().length < 2) {
+      setResultadosBusqueda([]);
+      return;
+    }
+
+    try {
+      const respuesta = await fetch(`http://localhost:5000/api/alumnos/buscar?q=${texto}`);
+      const data = await respuesta.json();
+      
+      // Obtenemos el registro del usuario actual (el líder) para excluirlo
+      const registroLider = integrantes[0].matricula;
+      
+      // FILTRO PROFESIONAL: Quitamos al líder de los resultados
+      const resultadosFiltrados = data.filter(alumno => alumno.registro !== registroLider);
+      
+      setResultadosBusqueda(resultadosFiltrados);
+    } catch (error) {
+      console.error("Error al buscar compañeros:", error);
+    }
+  };
+
+  const agregarIntegranteDesdeBuscador = (alumno) => {
+    if (!integrantes.find(i => i.matricula === alumno.registro)) {
+      setIntegrantes([...integrantes, { 
+        id: Date.now(), 
+        nombre: alumno.nombre, 
+        matricula: alumno.registro, 
+        rol: 'Colaborador' 
+      }]);
+    }
+    setBusquedaIntegrante('');
+    setResultadosBusqueda([]);
+  };
+  // ---------------------------------------------
+  // ---------------------------------------------
+
   const [materiales, setMateriales] = useState(() => {
     const guardados = localStorage.getItem('solicitud_materiales_safe');
     return guardados ? JSON.parse(guardados) : [
@@ -94,58 +150,37 @@ const Solicitud = () => {
     setIntegrantes(integrantes.filter(i => i.id !== id));
   };
 
-  const agregarIntegrante = (e) => {
-    e.preventDefault();
-    if (!matriculaNueva.trim()) return;
-    setIntegrantes([...integrantes, { id: Date.now(), nombre: 'Integrante Añadido', matricula: matriculaNueva.toUpperCase(), rol: 'Colaborador' }]);
-    setMatriculaNueva('');
-    setMostrarInputMatricula(false);
-  };
-
-    // Agregamos 'async' porque el mensajero tarda unos milisegundos en ir y venir a la BD
   const enviarSolicitud = async () => {
-    // CANDADO 1: Que no vaya vacío el propósito (Quitando espacios en blanco)
-    if (!proposito || !proposito.trim()) {
-      alert("Por favor, escribe el propósito del proyecto antes de enviar la solicitud.");
-      return;
-    }
+    if (!horaRecogida) return alert("Por favor, selecciona la hora a la que recogerás el material.");
+    if (!horaDevolucion) return alert("Por favor, selecciona la hora límite en la que devolverás el material.");
+    if (!proposito || !proposito.trim()) return alert("Por favor, escribe el propósito del proyecto antes de enviar la solicitud.");
+    if (materiales.length === 0) return alert("No hay materiales en tu resumen para solicitar.");
 
-    // CANDADO 2: Que haya materiales en el carrito
-    if (materiales.length === 0) {
-      alert("No hay materiales en tu resumen para solicitar.");
-      return;
-    }
-    
-
-    // 1. Empaquetamos los datos EXACTAMENTE como los pide tu server.js
     const paqueteDatos = {
       id_pedido: `PED-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-      fecha_recogida: fecha, // El estado que creamos con el carrusel
+      fecha_recogida: fecha,
+      hora_recogida: horaRecogida,
+      hora_devolucion: horaDevolucion,
       proposito: proposito,
-      solicitante: integrantes[0].matricula, // El líder del equipo (el primer elemento)
+      solicitante: integrantes[0].matricula,
       integrantes: integrantes,
       materiales: materiales
     };
 
     try {
-      // 2. Lanzamos el paquete hacia la ventanilla 4 de Node.js
       const respuesta = await fetch('http://localhost:5000/api/pedidos', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(paqueteDatos)
       });
 
       const datosServidor = await respuesta.json();
 
-      // 3. Revisamos si la base de datos nos dio luz verde
       if (datosServidor.status === "success") {
         alert("¡Solicitud registrada oficialmente en SafeStock!");
-        localStorage.removeItem('solicitud_materiales_safe'); // Limpiamos el carrito
-        navigate('/pedidos'); // Lo mandamos a la pantalla de historial
+        localStorage.removeItem('solicitud_materiales_safe');
+        navigate('/pedidos');
       } else {
-        // Si el backend se queja por algo
         alert("Hubo un problema: " + datosServidor.message);
       }
 
@@ -155,7 +190,6 @@ const Solicitud = () => {
     }
   };
   
-
   const totalUnidades = materiales.reduce((acc, curr) => acc + curr.cantidad, 0);
 
   return (
@@ -178,18 +212,16 @@ const Solicitud = () => {
             </p>
           </div>
 
-          {/* --- SECCIÓN DE FECHA MODIFICADA --- */}
           <section className="mb-8">
             <h3 className="text-slate-500 text-[10px] font-black uppercase tracking-widest mb-3">Fecha de recogida *</h3>
             <div className="flex flex-col sm:flex-row sm:items-center gap-3">
               <input 
                 type="text" 
                 value={fecha} 
-                readOnly // Evitamos que escriban cosas raras, solo lectura
+                readOnly 
                 className="w-full max-w-md bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 text-xs font-bold text-slate-800 outline-none shadow-inner" 
               />
               
-              {/* RENDERIZADO DINÁMICO DE BOTONES (AHORA CON SCROLL HORIZONTAL) */}
               <div className="flex gap-2 text-[10px] font-black overflow-x-auto pb-2 w-full scroll-smooth">
                 {opcionesFechas.map((f) => (
                   <button 
@@ -197,7 +229,6 @@ const Solicitud = () => {
                     type="button" 
                     disabled={f.esHoy} 
                     onClick={() => setFecha(f.valorLargo)} 
-                    // shrink-0 es la magia que evita que el botón se aplaste al haber muchos
                     className={`shrink-0 px-4 py-2 rounded-xl transition-all ${
                       f.esHoy 
                         ? 'text-slate-300 bg-slate-50 cursor-not-allowed border border-slate-100' 
@@ -210,6 +241,42 @@ const Solicitud = () => {
                   </button>
                 ))}
               </div>
+            </div>
+          </section>
+
+          <section className="mb-8">
+            <h3 className="text-slate-500 text-[10px] font-black uppercase tracking-widest mb-3">Horario de préstamo *</h3>
+            <div className="flex flex-col md:flex-row gap-4">
+              <select 
+                value={horaRecogida}
+                onChange={handleCambioRecogida}
+                className="flex-1 bg-slate-50 border border-slate-100 rounded-xl p-4 text-xs font-medium outline-none text-slate-800 cursor-pointer"
+              >
+                <option value="">Hora de recogida...</option>
+                {listaHoras.slice(0, -1).map((hora, index) => (
+                  <option key={`recogida-${index}`} value={hora}>{hora}</option>
+                ))}
+              </select>
+
+              <select 
+                value={horaDevolucion}
+                onChange={(e) => setHoraDevolucion(e.target.value)}
+                disabled={!horaRecogida}
+                className={`flex-1 border rounded-xl p-4 text-xs font-medium outline-none transition-colors ${
+                  !horaRecogida 
+                  ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed' 
+                  : 'bg-slate-50 border-slate-100 text-slate-800 cursor-pointer'
+                }`}
+              >
+                <option value="">Hora de devolución...</option>
+                {listaHoras.map((hora, index) => {
+                  const indiceRecogida = listaHoras.indexOf(horaRecogida);
+                  if (horaRecogida && index > indiceRecogida) {
+                    return <option key={`devolucion-${index}`} value={hora}>{hora}</option>;
+                  }
+                  return null;
+                })}
+              </select>
             </div>
           </section>
 
@@ -236,32 +303,57 @@ const Solicitud = () => {
             </div>
           </section>
 
-          {/* Integrantes */}
           <AnimatePresence>
             {esEquipo && (
-              <motion.section initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mb-8 overflow-hidden">
+              <motion.section initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mb-8">
                 <h3 className="text-slate-500 text-[10px] font-black uppercase tracking-widest mb-3">Integrantes del equipo *</h3>
-                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white text-xs">
+                
+                {/* Contenedor sin overflow-hidden para que el menú pueda flotar */}
+                <div className="border border-slate-200 rounded-xl bg-white text-xs">
                   {integrantes.map((integ) => (
                     <div key={integ.id} className="flex items-center justify-between p-3.5 border-b border-slate-100 last:border-0">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-[10px]">{integrantes.nombre ? integrantes.nombre.substring(0, 2).toUpperCase() : 'XX'}</div>
+                        <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-[10px]">{integ.nombre ? integ.nombre.substring(0, 2).toUpperCase() : 'XX'}</div>
                         <div>
                           <p className="font-bold text-[#1a1f2e]">{integ.nombre} {integ.id === 1 && <span className="text-[10px] text-slate-400 font-normal">· Tú (solicitante)</span>}</p>
                           <p className="text-[10px] text-slate-400 font-mono">{integ.matricula}</p>
                         </div>
                       </div>
-                      {integ.rol === 'Líder' ? <span className="text-[9px] font-black text-green-600 bg-green-50 px-2 py-0.5 rounded uppercase">Líder</span> : <button type="button" onClick={() => eliminarIntegrante(integ.id)} className="text-slate-300 hover:text-red-500 px-2">✕</button>}
+                      {integ.rol === 'Lider' ? <span className="text-[9px] font-black text-green-600 bg-green-50 px-2 py-0.5 rounded uppercase">Líder</span> : <button type="button" onClick={() => eliminarIntegrante(integ.id)} className="text-slate-300 hover:text-red-500 px-2 text-lg">✕</button>}
                     </div>
                   ))}
-                  {!mostrarInputMatricula ? (
-                    <button type="button" onClick={() => setMostrarInputMatricula(true)} className="w-full p-3 bg-slate-50 text-blue-600 font-bold text-[11px] uppercase border-t border-slate-100">+ Agregar integrante por matrícula</button>
-                  ) : (
-                    <form onSubmit={agregarIntegrante} className="p-2 bg-slate-50 border-t border-slate-100 flex gap-2">
-                      <input type="text" placeholder="Matrícula" value={matriculaNueva} onChange={(e) => setMatriculaNueva(e.target.value)} className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-bold outline-none uppercase" autoFocus />
-                      <button type="submit" className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-black uppercase">Añadir</button>
-                    </form>
-                  )}
+                  
+                  {/* BUSCADOR PREDICTIVO */}
+                  <div className="p-3 bg-slate-50 border-t border-slate-100 rounded-b-xl relative">
+                    <input
+                      type="text"
+                      value={busquedaIntegrante}
+                      onChange={manejarBusquedaIntegrante}
+                      placeholder="+ Buscar por nombre o registro..."
+                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold outline-none uppercase transition-colors focus:border-blue-500"
+                    />
+
+                    {/* MENÚ DESPLEGABLE TIPO GMAIL */}
+                    {resultadosBusqueda.length > 0 && (
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden max-h-48 overflow-y-auto mx-3">
+                        {resultadosBusqueda.map((alumno) => (
+                          <div
+                            key={alumno.registro}
+                            onClick={() => agregarIntegranteDesdeBuscador(alumno)}
+                            className="p-3 border-b border-slate-100 hover:bg-blue-50 cursor-pointer flex items-center gap-3 transition-colors"
+                          >
+                            <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 font-black flex items-center justify-center text-xs">
+                              {alumno.nombre.charAt(0)}
+                            </div>
+                            <div className="text-left">
+                              <p className="text-xs font-bold text-[#1a1f2e] leading-tight">{alumno.nombre}</p>
+                              <p className="text-[10px] text-slate-500 font-medium">{alumno.registro} - {alumno.correo}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <p className="mt-3 text-blue-500 text-[10px] bg-blue-50/40 p-3 rounded-xl border border-blue-100/30">💡 <span className="font-bold">Los pedidos del equipo se fusionarán automáticamente.</span> Si algún integrante ya agregó cosas, se unirán en una sola lista.</p>
               </motion.section>
@@ -300,9 +392,24 @@ const Solicitud = () => {
             </div>
 
             <div className="bg-green-50/60 border border-green-100 rounded-xl p-3.5 mb-4 text-xs text-left">
-              <p className="text-green-800 font-black uppercase text-[9px] tracking-wider">📅 Fecha de recogida confirmada</p>
+              <p className="text-green-800 font-black uppercase text-[9px] tracking-wider">📅 Fecha y Hora confirmada</p>
               <p className="text-green-700 font-bold mt-0.5">{fecha}</p>
-              <p className="text-green-600/70 text-[10px]">A partir de las 8:00 a.m.</p>
+              
+              <div className="mt-1 flex flex-col gap-0.5">
+                {horaRecogida && (
+                  <p className="text-green-800 text-[10px] font-medium">
+                    <span className="font-bold">Recogida:</span> {horaRecogida}
+                  </p>
+                )}
+                {horaDevolucion && (
+                  <p className="text-green-800 text-[10px] font-medium">
+                    <span className="font-bold">Devolución:</span> {horaDevolucion}
+                  </p>
+                )}
+                {!horaRecogida && (
+                  <p className="text-green-600/70 text-[10px]">A partir de las 7:00 am</p>
+                )}
+              </div>
             </div>
 
             {esEquipo && (
@@ -322,7 +429,6 @@ const Solicitud = () => {
             </div>
           </div>
         </aside>
-
       </div>
       </div>
     </AnimatedPage>

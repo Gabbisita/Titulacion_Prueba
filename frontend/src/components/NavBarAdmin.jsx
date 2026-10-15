@@ -7,7 +7,7 @@ const NavbarAdmin = () => {
   const handleLogout = () => {
     localStorage.removeItem('usuario_safestock');
     localStorage.removeItem('rol_safestock');
-    navigate('/login');
+    window.location.href = '/';
   };
 
   const linkClass = (path) => {
@@ -30,6 +30,7 @@ const NavbarAdmin = () => {
       <div className="flex items-center gap-8">
         <Link to="/inicioadmin" className={linkClass('/inicioadmin')}>Inicio</Link>
         <Link to="/pedidosadmin" className={linkClass('/pedidosadmin')}>Pedidos</Link>
+        <Link to="/admin/inventario" className={linkClass('/admin/inventario')}>Inventario</Link>
       </div>
 
       <div className="flex items-center gap-5">

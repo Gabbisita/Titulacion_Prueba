@@ -13,6 +13,10 @@ import Registro from './pages/Registro';
 import Carrito from './components/Carrito';
 import InicioAdmin from './pages/InicioAdmin';
 import PedidosAdmin from './pages/PedidosAdmin'; 
+import AsignarCasillero from './pages/AsignarCasillero';
+import InventarioAdmin from './pages/InventarioAdmin';
+import UsuariosAdmin from './pages/UsuariosAdmin';
+import CasillerosAdmin from './pages/CasillerosAdmin';
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -27,7 +31,11 @@ function App() {
     <Router>
       <ScrollToTop />
       <Routes>
+
         <Route path="/" element={<Login />} />
+        {/* Atrapa al "fantasma" que manda a /login */}
+        <Route path="/login" element={<Login />} />
+        
         <Route path="/inicio" element={<Inicio />} />
         <Route path="/inventario" element={<Inventario />} />
         <Route path="/material/:id" element={<DetalleMaterial />} />
@@ -38,6 +46,10 @@ function App() {
         <Route path="/registro" element={<Registro />} />
         <Route path="/inicioadmin" element={<InicioAdmin/>}/>
         <Route path="/pedidosadmin" element={<PedidosAdmin/>}/>
+        <Route path="/admin/asignar-casillero" element={<AsignarCasillero />} />
+        <Route path="/admin/inventario" element={<InventarioAdmin />} />
+        <Route path="/admin/usuarios" element={<UsuariosAdmin />} />
+        <Route path="/admin/casilleros" element={<CasillerosAdmin />} />
       </Routes>
     </Router>
   );
