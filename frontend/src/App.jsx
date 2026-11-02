@@ -17,6 +17,8 @@ import AsignarCasillero from './pages/AsignarCasillero';
 import InventarioAdmin from './pages/InventarioAdmin';
 import UsuariosAdmin from './pages/UsuariosAdmin';
 import CasillerosAdmin from './pages/CasillerosAdmin';
+import EstadisticasAdmin from './pages/EstadisticasAdmin';
+import FallasAdmin from './pages/FallasAdmin';
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -50,6 +52,8 @@ function App() {
         <Route path="/admin/inventario" element={<InventarioAdmin />} />
         <Route path="/admin/usuarios" element={<UsuariosAdmin />} />
         <Route path="/admin/casilleros" element={<CasillerosAdmin />} />
+        <Route path="/admin/estadisticas" element={<EstadisticasAdmin />} />
+        <Route path="/admin/fallas" element={<FallasAdmin />} />
       </Routes>
     </Router>
   );

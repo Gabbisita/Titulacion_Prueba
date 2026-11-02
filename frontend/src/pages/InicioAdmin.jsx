@@ -29,7 +29,7 @@ const InicioAdmin = () => {
       titulo: 'Estadisticas', 
       icono: '📊', 
       descripcion: 'Consulte de forma gráfica qué materiales se piden más seguido para optimizar el inventario.',
-      ruta: '/admin/inventario'
+      ruta: '/admin/estadisticas'
     },
 
     { 
@@ -46,6 +46,14 @@ const InicioAdmin = () => {
       icono: '👥', 
       descripcion: 'Consulta y administra las cuentas de los alumnos registrados en el sistema.',
       ruta: '/admin/usuarios'
+    },
+
+    {
+      id: 'fallas',
+      titulo: 'Reporte de fallas',
+      icono: '🛠️',
+      descripcion: 'Registre el equipo dañado y dé seguimiento a su reparación para saber cuál falla más.',
+      ruta: '/admin/fallas'
     },
 
 

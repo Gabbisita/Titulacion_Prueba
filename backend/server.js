@@ -565,6 +565,194 @@ app.delete('/api/admin/usuarios/:registro', (req, res) => {
     });
 });
 
+// =======================================================
+// RUTAS DE ESTADÍSTICAS (ADMINISTRADOR)
+// Reporte MENSUAL: GET /api/admin/estadisticas?mes=AAAA-MM
+// =======================================================
+
+// Solo cuenta pedidos que sí se convirtieron en préstamo
+// (excluye 1 = Pendiente, 4 = Rechazado, 7 = Expirado)
+const FILTRO_PRESTAMOS = "p.FK_Estado NOT IN (1, 4, 7)";
+const FILTRO_MES = "DATE_FORMAT(p.Fecha_Solicitud, '%Y-%m') = ?";
+
+// Envuelve db.query en una promesa para lanzar varias consultas a la vez
+const consultar = (sql, parametros) => new Promise((resolve, reject) => {
+    db.query(sql, parametros, (err, resultados) => (err ? reject(err) : resolve(resultados)));
+});
+
+app.get('/api/admin/estadisticas', async (req, res) => {
+    const mes = req.query.mes;
+    if (!/^\d{4}-\d{2}$/.test(mes || '')) {
+        return res.status(400).json({ error: "Indica el mes en formato AAAA-MM" });
+    }
+
+    const queryTotal = `SELECT COUNT(*) AS total FROM pedido p WHERE ${FILTRO_PRESTAMOS} AND ${FILTRO_MES}`;
+
+    const queryTotalAnterior = `
+        SELECT COUNT(*) AS total FROM pedido p
+        WHERE ${FILTRO_PRESTAMOS}
+        AND DATE_FORMAT(p.Fecha_Solicitud, '%Y-%m') = DATE_FORMAT(DATE_SUB(STR_TO_DATE(CONCAT(?, '-01'), '%Y-%m-%d'), INTERVAL 1 MONTH), '%Y-%m')
+    `;
+
+    // Todos los pedidos del mes por estado (incluye pendientes, rechazados y expirados)
+    const queryEstados = `
+        SELECT est.Nombre_de_estado AS estado, COUNT(*) AS total
+        FROM pedido p
+        JOIN estado_pedido est ON p.FK_Estado = est.No_estado
+        WHERE ${FILTRO_MES}
+        GROUP BY est.No_estado, est.Nombre_de_estado
+        ORDER BY total DESC
+    `;
+
+    const querySemanas = `
+        SELECT FLOOR((DAY(p.Fecha_Solicitud) - 1) / 7) + 1 AS semana, COUNT(*) AS prestamos
+        FROM pedido p
+        WHERE ${FILTRO_PRESTAMOS} AND ${FILTRO_MES}
+        GROUP BY semana
+        ORDER BY semana ASC
+    `;
+
+    const queryTop = `
+        SELECT m.ID_Material AS id, m.Nombre AS nombre, c.Nombre_Categoria AS categoria,
+               COUNT(DISTINCT p.ID_Pedido) AS prestamos
+        FROM detalle_pedido dp
+        JOIN pedido p ON dp.FK_Pedido = p.ID_Pedido
+        JOIN material m ON dp.FK_Material = m.ID_Material
+        LEFT JOIN categoria_material c ON m.FK_No_Categoria = c.No_Categoria
+        WHERE ${FILTRO_PRESTAMOS} AND ${FILTRO_MES}
+        GROUP BY m.ID_Material, m.Nombre, c.Nombre_Categoria
+        ORDER BY prestamos DESC
+        LIMIT 8
+    `;
+
+    const queryCategorias = `
+        SELECT IFNULL(c.Nombre_Categoria, 'Sin categoría') AS categoria, COUNT(DISTINCT p.ID_Pedido) AS prestamos
+        FROM detalle_pedido dp
+        JOIN pedido p ON dp.FK_Pedido = p.ID_Pedido
+        JOIN material m ON dp.FK_Material = m.ID_Material
+        LEFT JOIN categoria_material c ON m.FK_No_Categoria = c.No_Categoria
+        WHERE ${FILTRO_PRESTAMOS} AND ${FILTRO_MES}
+        GROUP BY categoria
+        ORDER BY prestamos DESC
+    `;
+
+    const queryHoras = `
+        SELECT CONCAT(LPAD(HOUR(STR_TO_DATE(p.Hora_Recogida, '%l:%i %p')), 2, '0'), ':00') AS hora, COUNT(*) AS solicitudes
+        FROM pedido p
+        WHERE STR_TO_DATE(p.Hora_Recogida, '%l:%i %p') IS NOT NULL AND ${FILTRO_MES}
+        GROUP BY hora
+        ORDER BY hora ASC
+    `;
+
+    const queryDias = `
+        SELECT SUBSTRING_INDEX(p.Fecha_Recogida, ' ', 1) AS dia, COUNT(*) AS solicitudes
+        FROM pedido p
+        WHERE p.Fecha_Recogida IS NOT NULL AND ${FILTRO_MES}
+        GROUP BY dia
+        ORDER BY FIELD(dia, 'Lunes', 'Martes', 'Miércoles', 'Miercoles', 'Jueves', 'Viernes', 'Sábado', 'Sabado', 'Domingo') ASC
+    `;
+
+    const querySemestres = `
+        SELECT s.Nombre_Semestre AS semestre, COUNT(*) AS solicitudes
+        FROM pedido p
+        JOIN alumno a ON p.FK_Solicitante = a.Registro_Alu
+        JOIN semestre s ON a.FK_Semestre = s.ID_Semestre
+        WHERE ${FILTRO_MES}
+        GROUP BY s.ID_Semestre, s.Nombre_Semestre
+        ORDER BY s.ID_Semestre ASC
+    `;
+
+    try {
+        const [total, totalAnterior, prestamosPorEstado, porSemana, topHerramientas, porCategoria, horasPico, porDiaSemana, semestres] =
+            await Promise.all([
+                consultar(queryTotal, [mes]),
+                consultar(queryTotalAnterior, [mes]),
+                consultar(queryEstados, [mes]),
+                consultar(querySemanas, [mes]),
+                consultar(queryTop, [mes]),
+                consultar(queryCategorias, [mes]),
+                consultar(queryHoras, [mes]),
+                consultar(queryDias, [mes]),
+                consultar(querySemestres, [mes]),
+            ]);
+
+        res.json({
+            mes,
+            totalPrestamos: total[0].total,
+            totalMesAnterior: totalAnterior[0].total,
+            prestamosPorEstado,
+            porSemana,
+            topHerramientas,
+            porCategoria,
+            horasPico,
+            porDiaSemana,
+            semestres
+        });
+    } catch (err) {
+        console.error("Error al calcular estadísticas:", err);
+        res.status(500).json({ error: "Error al calcular las estadísticas del mes" });
+    }
+});
+
+// =======================================================
+// RUTAS DE REPORTES DE FALLA (ADMINISTRADOR)
+// Requiere la tabla de backend/sql/reporte_falla.sql
+// =======================================================
+
+app.get('/api/admin/fallas', (req, res) => {
+    const queryFallas = `
+        SELECT f.ID_Falla AS id, DATE_FORMAT(f.Fecha_Reporte, '%Y-%m-%dT%H:%i:%s') AS fecha, f.FK_Material AS materialId,
+               m.Nombre AS materialNombre, c.Nombre_Categoria AS categoria, f.Cantidad AS cantidad,
+               f.Tipo_Falla AS tipo, f.Severidad AS severidad, f.Estado AS estado,
+               IFNULL(f.FK_Pedido, '') AS pedido, IFNULL(f.FK_Matricula, '') AS matricula,
+               f.Descripcion AS descripcion, f.Reportado_Por AS reportadoPor
+        FROM reporte_falla f
+        JOIN material m ON f.FK_Material = m.ID_Material
+        LEFT JOIN categoria_material c ON m.FK_No_Categoria = c.No_Categoria
+        ORDER BY f.Fecha_Reporte DESC
+    `;
+
+    db.query(queryFallas, (err, resultados) => {
+        if (err) return res.status(500).json({ error: "Error al cargar los reportes de falla" });
+        res.json(resultados);
+    });
+});
+
+app.post('/api/admin/fallas', (req, res) => {
+    const { materialId, cantidad, tipo, severidad, pedido, matricula, descripcion, reportadoPor } = req.body;
+
+    if (!materialId || !tipo || !severidad || !descripcion || !reportadoPor) {
+        return res.status(400).json({ status: "error", message: "Faltan datos obligatorios del reporte." });
+    }
+
+    const queryInsertar = `
+        INSERT INTO reporte_falla (FK_Material, Cantidad, Tipo_Falla, Severidad, FK_Pedido, FK_Matricula, Descripcion, Reportado_Por)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    const valores = [materialId, cantidad || 1, tipo, severidad, pedido || null, matricula || null, descripcion, reportadoPor];
+
+    db.query(queryInsertar, valores, (err, resultado) => {
+        if (err) {
+            console.error("Error al registrar falla:", err);
+            return res.status(500).json({ status: "error", message: "Error al registrar el reporte de falla." });
+        }
+        res.status(201).json({ status: "success", message: "Reporte de falla registrado.", id: resultado.insertId });
+    });
+});
+
+app.put('/api/admin/fallas/:id/estado', (req, res) => {
+    const { estado } = req.body;
+    const estadosValidos = ['Pendiente', 'En reparación', 'Reparado', 'Dado de baja'];
+    if (!estadosValidos.includes(estado)) {
+        return res.status(400).json({ status: "error", message: "Estado no válido." });
+    }
+
+    db.query("UPDATE reporte_falla SET Estado = ? WHERE ID_Falla = ?", [estado, req.params.id], (err) => {
+        if (err) return res.status(500).json({ status: "error", message: "Error al actualizar el estado." });
+        res.json({ status: "success", message: "Estado actualizado." });
+    });
+});
+
 // --- ENCENDIDO DEL SERVIDOR ---
 app.listen(5000, () => {
     console.log("Servidor corriendo en el puerto 5000");
