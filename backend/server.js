@@ -571,8 +571,8 @@ app.delete('/api/admin/usuarios/:registro', (req, res) => {
 // =======================================================
 
 // Solo cuenta pedidos que sí se convirtieron en préstamo
-// (excluye 1 = Pendiente, 4 = Rechazado, 7 = Expirado)
-const FILTRO_PRESTAMOS = "p.FK_Estado NOT IN (1, 4, 7)";
+// (excluye 1 = Solicitado, 4 = Rechazado, 6 = Cancelado, 7 = Expirado)
+const FILTRO_PRESTAMOS = "p.FK_Estado NOT IN (1, 4, 6, 7)";
 const FILTRO_MES = "DATE_FORMAT(p.Fecha_Solicitud, '%Y-%m') = ?";
 
 // Envuelve db.query en una promesa para lanzar varias consultas a la vez
@@ -644,8 +644,13 @@ app.get('/api/admin/estadisticas', async (req, res) => {
         ORDER BY hora ASC
     `;
 
+    // Fecha_Recogida puede venir como "Martes 16 de junio, 2026" o, en pedidos antiguos, como "2026-06-18"
     const queryDias = `
-        SELECT SUBSTRING_INDEX(p.Fecha_Recogida, ' ', 1) AS dia, COUNT(*) AS solicitudes
+        SELECT CASE
+                   WHEN p.Fecha_Recogida REGEXP '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                   THEN ELT(DAYOFWEEK(STR_TO_DATE(p.Fecha_Recogida, '%Y-%m-%d')), 'Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado')
+                   ELSE SUBSTRING_INDEX(p.Fecha_Recogida, ' ', 1)
+               END AS dia, COUNT(*) AS solicitudes
         FROM pedido p
         WHERE p.Fecha_Recogida IS NOT NULL AND ${FILTRO_MES}
         GROUP BY dia

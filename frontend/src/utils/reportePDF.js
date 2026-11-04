@@ -251,7 +251,7 @@ export const generarReporteCoordinacion = (datosEstadisticas, listaInventario = 
   // 4. HORARIO Y PERFIL DE LOS SOLICITANTES
   // =======================================================
   tituloSeccion('4. Horario y Perfil de los Solicitantes', 52);
-  subtitulo('Solicitudes por hora de recogida (turno vespertino)', margen, y);
+  subtitulo('Solicitudes por hora de recogida', margen, y);
   y += 3;
   y += columnas(margen, y, ancho, 48, horasPico.map((h) => ({ etiqueta: h.hora, valor: h.solicitudes }))) + 8;
 

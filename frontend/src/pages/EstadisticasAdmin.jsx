@@ -200,7 +200,7 @@ const EstadisticasAdmin = () => {
           {/* ===== HORARIO Y ALUMNOS ===== */}
           <TituloSeccion titulo="Horario y alumnos" descripcion="Cuándo y quién solicita el material" />
 
-          <Tarjeta titulo="Hora pico de pedidos" subtitulo="Solicitudes según la hora de recogida · turno vespertino" className="mb-8">
+          <Tarjeta titulo="Hora pico de pedidos" subtitulo="Solicitudes según la hora de recogida" className="mb-8">
             <Columnas datos={horasPico.map((h) => ({ etiqueta: h.hora, valor: h.solicitudes }))} unidad="solicitudes" />
           </Tarjeta>
 

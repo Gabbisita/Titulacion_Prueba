@@ -5,7 +5,7 @@ import { mockEstadisticas, mockInventario } from '../data/mockEstadisticas';
 // true  -> usa los datos de prueba (no necesita base de datos)
 // false -> consulta el backend real (estadísticas, materiales y fallas)
 // =======================================================
-export const USAR_MOCK = true;
+export const USAR_MOCK = false;
 
 export const API_URL = 'http://localhost:5000';
 
