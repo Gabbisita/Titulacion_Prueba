@@ -9,7 +9,7 @@ const UsuariosAdmin = () => {
   // --- OBTENER USUARIOS DE MYSQL ---
   const obtenerUsuarios = async () => {
     try {
-      const respuesta = await fetch('http://localhost:5000/api/admin/usuarios');
+      const respuesta = await fetch('/backend/api/admin/usuarios');
       const data = await respuesta.json();
       
       const dataLimpia = data.map(user => ({
@@ -30,7 +30,7 @@ const UsuariosAdmin = () => {
   const eliminarUsuario = async (registro, nombre) => {
     if (window.confirm(`ATENCIÓN: ¿Estás seguro de que deseas dar de baja permanentemente al alumno ${nombre} (${registro})?`)) {
       try {
-        const respuesta = await fetch(`http://localhost:5000/api/admin/usuarios/${registro}`, {
+        const respuesta = await fetch(`/backend/api/admin/usuarios/${registro}`, {
           method: 'DELETE'
         });
         

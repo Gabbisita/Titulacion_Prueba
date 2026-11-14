@@ -3,11 +3,14 @@ const db = require('./db');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const multer = require('multer'); // <-- NUEVO: Librería para subir archivos
-const path = require('path');     // <-- NUEVO: Librería para manejar rutas de carpetas
+const path = require('path');
+const crypto = require('crypto');
+const { correoBienvenida, correoPedido, correoRecuperacion, correoAprobado, correoRechazado, correoPase } = require('./mailer');
+const { leerToken, qrDataUrl, qrBuffer } = require('./qrSeguro');     // <-- NUEVO: Librería para manejar rutas de carpetas
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 
 // =======================================================
 // CONFIGURACIÓN DE MULTER (GUARDADO FÍSICO DE IMÁGENES)
@@ -56,7 +59,11 @@ app.post('/', (req, res) => {
                 if (err) return res.status(500).json({ error: err.message });
 
                 if (resultAlumno.length > 0) {
-                    const alumno = resultAlumno[0]; 
+                    const alumno = resultAlumno[0];
+
+                    if (!alumno.Password) {
+                        return res.status(401).json({ status: "error", message: "Esta cuenta no tiene contraseña registrada. Contacta al administrador." });
+                    }
 
                     bcrypt.compare(password, alumno.Password, (err, coinciden) => {
                         if (err) return res.status(500).json({ error: "Error interno de seguridad" });
@@ -105,7 +112,7 @@ app.get('/api/materiales/:id', (req, res) => {
 app.post('/registro', (req, res) => {
     const { nombre, registro_alu, email, password, telefono, carrera_texto, semestre_texto } = req.body;
 
-    if (!email.endsWith('@ceti.mx')) {
+    if (!/^[^\s@]+@ceti\.mx$/i.test(String(email || '').trim())) {
         return res.status(400).json({ 
             status: "error", 
             message: "Por seguridad, solo se permiten correos institucionales (@ceti.mx)" 
@@ -132,6 +139,7 @@ app.post('/registro', (req, res) => {
                 return res.status(500).json({ status: "error", message: err.message });
             }
             res.status(201).json({ status: "success", message: "Cuenta creada con éxito" });
+            correoBienvenida(email, nombre);
         });
     });
 });
@@ -184,8 +192,110 @@ app.post('/api/pedidos', (req, res) => {
                 db.query(queryDetalle, [valoresDetalles], (err) => {
                     if (err) return res.status(500).json({ status: "error", message: "Error al registrar los materiales." });
                     res.status(200).json({ status: "success", message: "Pedido de equipo procesado con éxito." });
+                    notificarPedido(id_pedido, listaMatriculas, materiales, { fecha_recogida, hora_recogida, hora_devolucion, proposito });
                 });
             });
+        });
+    });
+});
+
+// Manda el correo de confirmación a cada integrante del equipo (no bloquea la respuesta).
+function notificarPedido(idPedido, matriculas, materiales, datos) {
+    const ids = materiales.map(m => m.id);
+    db.query('SELECT ID_Material, Nombre FROM material WHERE ID_Material IN (?)', [ids], (err, mats) => {
+        const nombres = {};
+        (mats || []).forEach(m => { nombres[m.ID_Material] = m.Nombre; });
+        const pedido = {
+            id: idPedido,
+            fecha: datos.fecha_recogida ? String(datos.fecha_recogida) : '',
+            horaRecogida: datos.hora_recogida || '',
+            horaDevolucion: datos.hora_devolucion || '',
+            proposito: datos.proposito || '',
+            materiales: materiales.map(m => ({ nombre: nombres[m.id] || m.n || `Material ${m.id}`, cantidad: m.cantidad })),
+        };
+        db.query('SELECT Nombre, Email FROM alumno WHERE Registro_Alu IN (?)', [matriculas], (err, alumnos) => {
+            if (err) return console.error('No se pudieron obtener los correos del equipo:', err.message);
+            alumnos.forEach(a => a.Email && correoPedido(a.Email, a.Nombre, pedido));
+        });
+    });
+}
+
+// =======================================================
+// RECUPERAR CONTRASEÑA (código de 6 dígitos por correo)
+// =======================================================
+// Los códigos viven en memoria: vencen en 15 min y se pierden si el servidor se reinicia.
+const codigosRecuperacion = new Map(); // email -> { hash, expira, intentos, tabla }
+const QUINCE_MIN = 15 * 60 * 1000;
+const hashCodigo = (codigo) => crypto.createHash('sha256').update(codigo).digest('hex');
+
+function buscarCuenta(email, cb) {
+    db.query('SELECT Nombre FROM administrador WHERE Email = ?', [email], (err, admins) => {
+        if (err) return cb(err);
+        if (admins.length > 0) return cb(null, { tabla: 'administrador', nombre: admins[0].Nombre });
+        db.query('SELECT Nombre FROM alumno WHERE Email = ?', [email], (err, alumnos) => {
+            if (err) return cb(err);
+            if (alumnos.length > 0) return cb(null, { tabla: 'alumno', nombre: alumnos[0].Nombre });
+            cb(null, null);
+        });
+    });
+}
+
+app.post('/api/recuperar/solicitar', (req, res) => {
+    const email = String(req.body.email || '').trim();
+    if (!email) return res.status(400).json({ status: "error", message: "Escribe tu correo." });
+
+    const previo = codigosRecuperacion.get(email.toLowerCase());
+    if (previo && previo.expira - QUINCE_MIN + 60 * 1000 > Date.now()) {
+        return res.status(429).json({ status: "error", message: "Ya te enviamos un código. Espera un minuto para pedir otro." });
+    }
+
+    buscarCuenta(email, async (err, cuenta) => {
+        if (err) return res.status(500).json({ status: "error", message: "Error al buscar la cuenta." });
+        if (!cuenta) return res.status(404).json({ status: "error", message: "No hay ninguna cuenta con ese correo." });
+
+        const codigo = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+        codigosRecuperacion.set(email.toLowerCase(), {
+            hash: hashCodigo(codigo), expira: Date.now() + QUINCE_MIN, intentos: 0, tabla: cuenta.tabla,
+        });
+
+        const enviado = await correoRecuperacion(email, cuenta.nombre || '', codigo);
+        if (!enviado) {
+            codigosRecuperacion.delete(email.toLowerCase());
+            return res.status(500).json({ status: "error", message: "No se pudo enviar el correo. Intenta más tarde." });
+        }
+        res.json({ status: "success", message: "Te enviamos un código de 6 dígitos a tu correo." });
+    });
+});
+
+app.post('/api/recuperar/confirmar', (req, res) => {
+    const email = String(req.body.email || '').trim();
+    const codigo = String(req.body.codigo || '').trim();
+    const nueva = String(req.body.password || '');
+    const registro = codigosRecuperacion.get(email.toLowerCase());
+
+    if (!registro || registro.expira < Date.now()) {
+        codigosRecuperacion.delete(email.toLowerCase());
+        return res.status(400).json({ status: "error", message: "El código venció o no existe. Pide uno nuevo." });
+    }
+    if (registro.intentos >= 5) {
+        codigosRecuperacion.delete(email.toLowerCase());
+        return res.status(429).json({ status: "error", message: "Demasiados intentos. Pide un código nuevo." });
+    }
+    if (hashCodigo(codigo) !== registro.hash) {
+        registro.intentos++;
+        return res.status(400).json({ status: "error", message: "El código es incorrecto." });
+    }
+    if (nueva.length < 6) {
+        return res.status(400).json({ status: "error", message: "La contraseña debe tener al menos 6 caracteres." });
+    }
+
+    bcrypt.hash(nueva, 10, (err, hash) => {
+        if (err) return res.status(500).json({ status: "error", message: "Error al encriptar." });
+        // registro.tabla solo puede ser 'administrador' o 'alumno' (lo fija buscarCuenta)
+        db.query(`UPDATE ${registro.tabla} SET Password = ? WHERE Email = ?`, [hash, email], (err) => {
+            if (err) return res.status(500).json({ status: "error", message: "No se pudo guardar la contraseña." });
+            codigosRecuperacion.delete(email.toLowerCase());
+            res.json({ status: "success", message: "¡Listo! Ya puedes iniciar sesión con tu nueva contraseña." });
         });
     });
 });
@@ -209,6 +319,7 @@ app.get('/api/mis-pedidos/:matricula', (req, res) => {
                 p.Fecha_Solicitud, 
                 p.Fecha_Recogida, 
                 p.Proposito, 
+                p.Motivo_Rechazo,
                 est.Nombre_de_estado AS Estado, 
                 ep.Rol,
                 GROUP_CONCAT(CONCAT(dp.Cantidad, 'x ', m.Nombre) SEPARATOR '|') AS ListaMateriales
@@ -218,7 +329,7 @@ app.get('/api/mis-pedidos/:matricula', (req, res) => {
             LEFT JOIN detalle_pedido dp ON p.ID_Pedido = dp.FK_Pedido
             LEFT JOIN material m ON dp.FK_Material = m.ID_Material
             WHERE ep.FK_Matricula = ? AND est.No_estado != 7 
-            GROUP BY p.ID_Pedido, p.Fecha_Solicitud, p.Fecha_Recogida, p.Proposito, est.Nombre_de_estado, ep.Rol
+            GROUP BY p.ID_Pedido, p.Fecha_Solicitud, p.Fecha_Recogida, p.Proposito, p.Motivo_Rechazo, est.Nombre_de_estado, ep.Rol
             ORDER BY p.Fecha_Solicitud DESC;
         `;
 
@@ -300,8 +411,21 @@ app.put('/api/admin/pedidos/:id/aprobar', (req, res) => {
     const idPedido = req.params.id;
     const { id_casillero } = req.body; 
 
+    if (!id_casillero) return res.status(400).json({ status: "error", message: "Selecciona un casillero." });
+
     db.beginTransaction((err) => {
         if (err) return res.status(500).json({ status: "error", message: "Error al iniciar el motor de base de datos" });
+
+        // El casillero elegido debe existir y estar libre: un casillero = un pedido.
+        db.query("SELECT Fk_Estado FROM casillero WHERE ID_Casillero = ? FOR UPDATE", [id_casillero], (err, celdas) => {
+            if (err) return db.rollback(() => res.status(500).json({ status: "error", message: "Error al revisar el casillero." }));
+            if (celdas.length === 0) return db.rollback(() => res.status(404).json({ status: "error", message: "Ese casillero no existe." }));
+            if (celdas[0].Fk_Estado !== 1) return db.rollback(() => res.status(409).json({ status: "error", message: "Ese casillero ya no está libre. Elige otro." }));
+
+        db.query("SELECT FK_Estado FROM pedido WHERE ID_Pedido = ? FOR UPDATE", [idPedido], (err, pedidos) => {
+            if (err) return db.rollback(() => res.status(500).json({ status: "error", message: "Error al revisar el pedido." }));
+            if (pedidos.length === 0) return db.rollback(() => res.status(404).json({ status: "error", message: "El pedido no existe." }));
+            if (pedidos[0].FK_Estado !== 1) return db.rollback(() => res.status(409).json({ status: "error", message: "Este pedido ya fue procesado." }));
 
         const queryUpdatePedido = "UPDATE pedido SET FK_Estado = 2, FK_Casillero = ? WHERE ID_Pedido = ?";
         
@@ -317,7 +441,7 @@ app.put('/api/admin/pedidos/:id/aprobar', (req, res) => {
                 
                 db.query(queryDetalles, [idPedido], (err, detalles) => {
                     if (err) return db.rollback(() => res.status(500).json({ status: "error", message: "Error al leer lista de materiales." }));
-                    if (detalles.length === 0) return db.commit(() => res.status(200).json({ status: "success", message: "Pedido procesado." }));
+                    if (detalles.length === 0) return db.commit(() => { res.status(200).json({ status: "success", message: "Pedido procesado." }); notificarAprobacion(idPedido); });
 
                     let restasCompletadas = 0;
                     detalles.forEach((item) => {
@@ -332,6 +456,7 @@ app.put('/api/admin/pedidos/:id/aprobar', (req, res) => {
                                 db.commit((errCommit) => {
                                     if (errCommit) return db.rollback(() => res.status(500).json({ status: "error", message: "Error al confirmar." }));
                                     res.status(200).json({ status: "success", message: "¡Stock descontado y casillero ocupado!" });
+                                    notificarAprobacion(idPedido);
                                 });
                             }
                         });
@@ -339,24 +464,183 @@ app.put('/api/admin/pedidos/:id/aprobar', (req, res) => {
                 });
             });
         });
+        });
+        });
     });
 });
 
 // --- VENTANILLA 7.5: ADMIN - RECHAZAR PEDIDO ---
 app.put('/api/admin/pedidos/:id/rechazar', (req, res) => {
     const idPedido = req.params.id;
-    // Asumiremos que en tu tabla 'estado_pedido', el número 5 o 6 es "Rechazado". 
-    // Usaremos el 5 como ejemplo para ocultarlo de los pendientes.
-    const queryRechazar = "UPDATE pedido SET FK_Estado = 4 WHERE ID_Pedido = ?";
-    
-    db.query(queryRechazar, [idPedido], (err, resultado) => {
+    const motivo = String(req.body.motivo || '').trim().slice(0, 500);
+    if (!motivo) return res.status(400).json({ status: "error", message: "Escribe el motivo del rechazo." });
+
+    // Solo se rechazan pedidos pendientes (estado 1). Se guarda el motivo para el alumno.
+    const queryRechazar = "UPDATE pedido SET FK_Estado = 4, Motivo_Rechazo = ? WHERE ID_Pedido = ? AND FK_Estado = 1";
+    db.query(queryRechazar, [motivo, idPedido], (err, resultado) => {
         if (err) {
             console.error("Error al rechazar pedido:", err);
             return res.status(500).json({ status: "error", message: "Error al actualizar el estado a rechazado." });
         }
+        if (resultado.affectedRows === 0) return res.status(409).json({ status: "error", message: "Este pedido ya fue procesado o no existe." });
         res.status(200).json({ status: "success", message: "Pedido rechazado y removido de la lista." });
+        notificarRechazo(idPedido);
     });
 });
+
+// --- MATERIALES MÁS SOLICITADOS (para la página de inicio) ---
+app.get('/api/materiales-populares', (req, res) => {
+    const limite = Math.min(Number(req.query.limite) || 4, 12);
+    // Cuenta en cuántos pedidos aparece cada material (sin contar rechazados, cancelados ni expirados).
+    // Si hay pocos pedidos, completa la lista con otros materiales del catálogo.
+    const query = `
+        SELECT m.ID_Material, m.Nombre, m.Cantidad, m.FK_No_Categoria,
+               COUNT(DISTINCT p.ID_Pedido) AS Veces_Solicitado,
+               COALESCE(SUM(CASE WHEN p.ID_Pedido IS NOT NULL THEN dp.Cantidad END), 0) AS Unidades_Solicitadas
+        FROM material m
+        LEFT JOIN detalle_pedido dp ON dp.FK_Material = m.ID_Material
+        LEFT JOIN pedido p ON p.ID_Pedido = dp.FK_Pedido AND p.FK_Estado NOT IN (4, 6, 7)
+        GROUP BY m.ID_Material, m.Nombre, m.Cantidad, m.FK_No_Categoria
+        ORDER BY Veces_Solicitado DESC, Unidades_Solicitadas DESC, m.Nombre ASC
+        LIMIT ?`;
+    db.query(query, [limite], (err, resultado) => {
+        if (err) return res.status(500).json({ status: "error", message: "Error al cargar los más solicitados." });
+        res.json(resultado);
+    });
+});
+
+// --- DETALLE REAL DE UN PEDIDO (página del pase / QR del alumno) ---
+function obtenerDetallePedido(idPedido, cb) {
+    const query = `
+        SELECT p.ID_Pedido, p.Fecha_Solicitud, p.Fecha_Recogida, p.Hora_Recogida, p.Hora_Devolucion,
+               p.Proposito, p.FK_Estado, est.Nombre_de_estado AS Estado, p.FK_Casillero, p.Motivo_Rechazo,
+               c.Identificador AS Casillero, a.Nombre AS Solicitante_Nombre, a.Apellido AS Solicitante_Apellido,
+               a.Registro_Alu AS Solicitante_Matricula, a.Email AS Solicitante_Email
+        FROM pedido p
+        JOIN estado_pedido est ON p.FK_Estado = est.No_estado
+        LEFT JOIN casillero c ON p.FK_Casillero = c.ID_Casillero
+        LEFT JOIN alumno a ON p.FK_Solicitante = a.Registro_Alu
+        WHERE p.ID_Pedido = ?`;
+    db.query(query, [idPedido], (err, filas) => {
+        if (err) return cb(err);
+        if (filas.length === 0) return cb(null, null);
+        const pedido = filas[0];
+        db.query(`SELECT m.ID_Material, m.Nombre, dp.Cantidad FROM detalle_pedido dp
+                  JOIN material m ON m.ID_Material = dp.FK_Material WHERE dp.FK_Pedido = ?`, [idPedido], (err, materiales) => {
+            if (err) return cb(err);
+            db.query(`SELECT a.Nombre, a.Email, ep.FK_Matricula, ep.Rol FROM equipo_pedido ep
+                      JOIN alumno a ON a.Registro_Alu = ep.FK_Matricula WHERE ep.FK_Pedido = ?`, [idPedido], (err, equipo) => {
+                if (err) return cb(err);
+                cb(null, { ...pedido, materiales, equipo });
+            });
+        });
+    });
+}
+
+app.get('/api/pedidos/:id', (req, res) => {
+    obtenerDetallePedido(req.params.id, (err, pedido) => {
+        if (err) return res.status(500).json({ status: "error", message: "Error al cargar el pedido." });
+        if (!pedido) return res.status(404).json({ status: "error", message: "Pedido no encontrado." });
+        // No exponemos los correos de los integrantes
+        pedido.equipo = pedido.equipo.map(({ Email, ...resto }) => resto);
+        delete pedido.Solicitante_Email;
+        res.json(pedido);
+    });
+});
+
+// QR cifrado del pedido. Solo existe si el pedido está aprobado y tiene casillero,
+// y solo se entrega a un integrante del pedido.
+app.get('/api/pedidos/:id/qr', (req, res) => {
+    const matricula = String(req.query.matricula || '');
+    obtenerDetallePedido(req.params.id, async (err, pedido) => {
+        if (err) return res.status(500).json({ status: "error", message: "Error al cargar el pedido." });
+        if (!pedido) return res.status(404).json({ status: "error", message: "Pedido no encontrado." });
+        if (!pedido.equipo.some(i => String(i.FK_Matricula) === matricula)) return res.status(403).json({ status: "error", message: "No perteneces a este pedido." });
+        if (pedido.FK_Estado !== 2 || !pedido.FK_Casillero) return res.status(409).json({ status: "error", message: "Este pedido no tiene un casillero activo." });
+        try {
+            res.json({ status: "success", qr: await qrDataUrl(pedido) });
+        } catch (e) {
+            res.status(500).json({ status: "error", message: "No se pudo generar el código QR." });
+        }
+    });
+});
+
+// Verifica un QR escaneado. Solo los QR generados por este servidor son válidos.
+//  - Panel del administrador:   POST /api/qr/verificar  { "codigo": "SSC2..." }  → JSON
+//  - Casillero (ESP32 + GM60):  POST/GET /api/qr/verificar?formato=texto&codigo=SSC2...
+//      responde texto plano "OK <número de casillero>" (abrir esa puerta) o "NO <motivo>"
+//      Opcional: &casillero=3 para que la puerta solo acepte códigos de su propio casillero.
+function verificarQR(req, res) {
+    const codigo = req.body?.codigo ?? req.query.codigo;
+    const enTexto = req.query.formato === 'texto';
+    const casilleroLector = req.query.casillero ? Number(req.query.casillero) : null;
+    const responder = (http, cuerpo, texto) => (enTexto ? res.status(http).type('text/plain').send(texto) : res.status(http).json(cuerpo));
+
+    const datos = leerToken(codigo);
+    if (!datos) return responder(400, { valido: false, message: "Código QR no válido: no fue generado por Safe Stock CETI o fue alterado." }, 'NO CODIGO_INVALIDO');
+    obtenerDetallePedido(datos.p, (err, pedido) => {
+        if (err) return responder(500, { valido: false, message: "Error al consultar el pedido." }, 'NO ERROR_SERVIDOR');
+        if (!pedido) return responder(404, { valido: false, message: "El pedido de este código ya no existe." }, 'NO PEDIDO_INEXISTENTE');
+        if (pedido.FK_Estado !== 2 || pedido.FK_Casillero !== datos.c) {
+            return responder(409, { valido: false, message: `El código es auténtico, pero el pedido ya no está activo en ese casillero (estado: ${pedido.Estado}).` }, 'NO PEDIDO_INACTIVO');
+        }
+        if (casilleroLector && casilleroLector !== pedido.FK_Casillero) {
+            return responder(409, { valido: false, message: `Este código es del casillero ${pedido.FK_Casillero}, no de este.` }, `NO OTRO_CASILLERO ${pedido.FK_Casillero}`);
+        }
+        const nombreCelda = pedido.Casillero || `Casillero ${pedido.FK_Casillero}`;
+        responder(200, {
+            valido: true,
+            message: `Acceso autorizado a ${nombreCelda}.`,
+            pedido: {
+                id: pedido.ID_Pedido,
+                casilleroId: pedido.FK_Casillero,
+                casillero: nombreCelda,
+                solicitante: `${pedido.Solicitante_Nombre || ''} ${pedido.Solicitante_Apellido || ''}`.trim(),
+                matricula: pedido.Solicitante_Matricula,
+                fecha: pedido.Fecha_Recogida,
+                horario: `${pedido.Hora_Recogida || ''} – ${pedido.Hora_Devolucion || ''}`,
+                materiales: pedido.materiales.map(m => ({ nombre: m.Nombre, cantidad: m.Cantidad })),
+            },
+        }, `OK ${pedido.FK_Casillero}`);
+    });
+}
+app.post('/api/qr/verificar', verificarQR);
+app.get('/api/qr/verificar', verificarQR);
+
+// Envía el pase (con el QR cifrado) al correo del alumno que lo pide; debe ser integrante del pedido.
+app.post('/api/pedidos/:id/enviar-pase', (req, res) => {
+    const { matricula } = req.body;
+    obtenerDetallePedido(req.params.id, async (err, pedido) => {
+        if (err) return res.status(500).json({ status: "error", message: "Error al cargar el pedido." });
+        if (!pedido) return res.status(404).json({ status: "error", message: "Pedido no encontrado." });
+        const integrante = pedido.equipo.find(i => String(i.FK_Matricula) === String(matricula));
+        if (!integrante || !integrante.Email) return res.status(403).json({ status: "error", message: "No perteneces a este pedido." });
+        if (pedido.FK_Estado !== 2 || !pedido.FK_Casillero) return res.status(409).json({ status: "error", message: "Este pedido no tiene un casillero activo." });
+        let qr;
+        try { qr = await qrBuffer(pedido); } catch { return res.status(500).json({ status: "error", message: "No se pudo generar el código QR." }); }
+        const ok = await correoPase(integrante.Email, integrante.Nombre, pedido, qr);
+        if (!ok) return res.status(500).json({ status: "error", message: "No se pudo enviar el correo." });
+        res.json({ status: "success", message: `Pase enviado a ${integrante.Email}` });
+    });
+});
+
+// Al aprobar: cada integrante recibe su casillero y el QR cifrado.
+function notificarAprobacion(idPedido) {
+    obtenerDetallePedido(idPedido, async (err, pedido) => {
+        if (err || !pedido) return console.error('No se pudo notificar la aprobación de', idPedido);
+        let qr = null;
+        try { qr = await qrBuffer(pedido); } catch (e) { console.error('No se pudo generar el QR de', idPedido, e.message); }
+        pedido.equipo.forEach(i => i.Email && correoAprobado(i.Email, i.Nombre, pedido, qr));
+    });
+}
+
+// Al rechazar: cada integrante recibe el motivo.
+function notificarRechazo(idPedido) {
+    obtenerDetallePedido(idPedido, (err, pedido) => {
+        if (err || !pedido) return console.error('No se pudo notificar el rechazo de', idPedido);
+        pedido.equipo.forEach(i => i.Email && correoRechazado(i.Email, i.Nombre, pedido));
+    });
+}
 
 // --- VENTANILLA 8: OBTENER EL MAPA DE CASILLEROS ---
 app.get('/api/casilleros', (req, res) => {
@@ -376,9 +660,15 @@ app.put('/api/admin/casilleros/:id/estado', (req, res) => {
     const idCasillero = req.params.id;
     const { nuevo_estado } = req.body; 
 
-    const queryUpdate = "UPDATE casillero SET FK_Estado = ? WHERE ID_Casillero = ?";
-    db.query(queryUpdate, [nuevo_estado, idCasillero], (err) => {
+    if (![1, 3].includes(Number(nuevo_estado))) {
+        return res.status(400).json({ status: "error", message: "Solo se puede cambiar a Libre o Mantenimiento." });
+    }
+
+    // No se puede cambiar a mano un casillero ocupado: primero hay que liberarlo.
+    const queryUpdate = "UPDATE casillero SET FK_Estado = ? WHERE ID_Casillero = ? AND Fk_Estado <> 2";
+    db.query(queryUpdate, [Number(nuevo_estado), idCasillero], (err, r) => {
         if (err) return res.status(500).json({ status: "error", message: "Error al actualizar." });
+        if (r.affectedRows === 0) return res.status(409).json({ status: "error", message: "El casillero está ocupado o no existe." });
         res.status(200).json({ status: "success", message: "Estado actualizado." });
     });
 });

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import Logo from '../components/Logo';
 
 const Registro = () => {
   const navigate = useNavigate();
@@ -68,7 +69,7 @@ const Registro = () => {
     }
 
     try {
-      const response = await fetch('http://localhost:5000/registro', {
+      const response = await fetch('/backend/registro', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -111,7 +112,7 @@ const Registro = () => {
       <div className="w-full md:w-[35%] bg-[#0a0f1d] text-white p-8 md:p-12 flex flex-col justify-between relative overflow-hidden min-h-[250px] md:min-h-screen flex-shrink-0">
         <div className="absolute -top-24 -left-24 w-64 h-64 bg-blue-600/10 rounded-full blur-3xl"></div>
         <div className="flex items-center gap-3 z-10">
-          <div className="bg-blue-600 text-white w-9 h-9 rounded-xl flex items-center justify-center font-black text-lg shadow-md shadow-blue-600/20">C</div>
+          <Logo tamano="sm" />
           <div>
             <p className="text-white font-black text-[11px] leading-none uppercase tracking-tight">
               CETI División de Ingeniería

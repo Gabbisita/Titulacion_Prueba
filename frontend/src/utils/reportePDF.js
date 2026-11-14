@@ -20,7 +20,22 @@ const GRIS_FONDO = [238, 238, 238];
 const BARRA = [70, 70, 70];
 const BARRA_SUAVE = [175, 175, 175];
 
-export const generarReporteCoordinacion = (datosEstadisticas, listaInventario = [], listaFallas = []) => {
+// Carga /logo.png como data URL para insertarlo en el PDF (null si falla).
+export const cargarLogo = async () => {
+  try {
+    const blob = await (await fetch('/logo.png')).blob();
+    return await new Promise((ok) => {
+      const lector = new FileReader();
+      lector.onload = () => ok(lector.result);
+      lector.onerror = () => ok(null);
+      lector.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+};
+
+export const generarReporteCoordinacion = (datosEstadisticas, listaInventario = [], listaFallas = [], logo = null) => {
   const doc = new jsPDF({ unit: 'mm', format: 'letter' });
   const anchoPagina = doc.internal.pageSize.getWidth();
   const altoPagina = doc.internal.pageSize.getHeight();
@@ -158,20 +173,25 @@ export const generarReporteCoordinacion = (datosEstadisticas, listaInventario = 
   // =======================================================
   // ENCABEZADO INSTITUCIONAL
   // =======================================================
-  escribir('SafeStock - Reporte Ejecutivo de Almacén', margen, 22, { size: 16, bold: true });
-  escribir('División de Ingeniería Mecatrónica', margen, 29, { size: 10.5, color: GRIS_TEXTO });
-  escribir(`Periodo: ${periodo}`, margen + ancho, 22, { size: 9.5, bold: true, align: 'right' });
-  escribir(`Fecha de emisión: ${fechaEmision}`, margen + ancho, 29, { size: 8.5, color: GRIS_TEXTO, align: 'right' });
+  // Logo + título a la izquierda; periodo y fecha en una franja aparte (así nada se encima)
+  const xTitulo = logo ? margen + 22 : margen;
+  if (logo) doc.addImage(logo, 'PNG', margen, 11, 18, 18, 'logo', 'FAST');
+  escribir('Reporte Ejecutivo de Almacén', xTitulo, 19, { size: 17, bold: true });
+  escribir('Safe Stock CETI · División de Ingeniería Mecatrónica', xTitulo, 26, { size: 10, color: GRIS_TEXTO });
+
+  doc.setFillColor(...GRIS_FONDO);
+  doc.rect(margen, 33, ancho, 8, 'F');
+  escribir('PERIODO', margen + 4, 38.3, { size: 7, bold: true, color: GRIS_TEXTO });
+  escribir(periodo, margen + 18, 38.3, { size: 9.5, bold: true });
+  escribir(`Fecha de emisión: ${fechaEmision}`, margen + ancho - 4, 38.3, { size: 8.5, color: GRIS_TEXTO, align: 'right' });
   doc.setDrawColor(...NEGRO);
-  doc.setLineWidth(0.8);
-  doc.line(margen, 34, margen + ancho, 34);
-  doc.setLineWidth(0.2);
-  doc.line(margen, 35.3, margen + ancho, 35.3);
+  doc.setLineWidth(0.6);
+  doc.line(margen, 41, margen + ancho, 41);
 
   // =======================================================
   // 1. RESUMEN DE INDICADORES CLAVE
   // =======================================================
-  y = 46;
+  y = 52;
   tituloSeccion('1. Resumen de Indicadores Clave', 50);
 
   const tarjetas = [
@@ -190,7 +210,11 @@ export const generarReporteCoordinacion = (datosEstadisticas, listaInventario = 
     doc.setLineWidth(0.3);
     doc.rect(tx, ty, anchoTarjeta, 20);
     escribir(t.titulo, tx + 3.5, ty + 5.5, { size: 6.5, bold: true, color: GRIS_TEXTO });
-    escribir(recortar(t.valor, anchoTarjeta - 7, 12), tx + 3.5, ty + 12.5, { size: 12, bold: true });
+    // Si el valor es largo, primero se reduce la letra (hasta 8.5) y solo después se recorta
+    let tam = 12;
+    doc.setFont('helvetica', 'bold');
+    while (tam > 8.5 && (doc.setFontSize(tam), doc.getTextWidth(String(t.valor))) > anchoTarjeta - 7) tam -= 0.5;
+    escribir(recortar(t.valor, anchoTarjeta - 7, tam), tx + 3.5, ty + 12.5, { size: tam, bold: true });
     escribir(t.detalle, tx + 3.5, ty + 17, { size: 7, color: GRIS_TEXTO });
   });
   y += 54;
@@ -319,12 +343,13 @@ export const generarReporteCoordinacion = (datosEstadisticas, listaInventario = 
     doc.setDrawColor(...GRIS_LINEA);
     doc.setLineWidth(0.2);
     if (i > 1) {
-      escribir('SafeStock - Reporte Ejecutivo de Almacén', margen, 15, { size: 8.5, bold: true });
+      if (logo) doc.addImage(logo, 'PNG', margen, 10, 6.5, 6.5, 'logo', 'FAST');
+      escribir('Safe Stock CETI · Reporte Ejecutivo de Almacén', logo ? margen + 8.5 : margen, 15, { size: 8.5, bold: true });
       escribir(`División de Ingeniería Mecatrónica · ${periodo}`, margen + ancho, 15, { size: 8, color: GRIS_TEXTO, align: 'right' });
       doc.line(margen, 18, margen + ancho, 18);
     }
     doc.line(margen, altoPagina - 15, margen + ancho, altoPagina - 15);
-    escribir('SafeStock · CETI Mecatrónica · Documento generado automáticamente', margen, altoPagina - 10, { size: 7.5, color: GRIS_TEXTO });
+    escribir('Safe Stock CETI · Mecatrónica · Documento generado automáticamente', margen, altoPagina - 10, { size: 7.5, color: GRIS_TEXTO });
     escribir(`Página ${i} de ${totalPaginas}`, margen + ancho, altoPagina - 10, { size: 7.5, color: GRIS_TEXTO, align: 'right' });
   }
 

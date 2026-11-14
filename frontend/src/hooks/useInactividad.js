@@ -1,41 +1,49 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { obtenerSesion, registrarActividad, sesionExpirada, cerrarSesion } from '../auth/sesion';
+import { mostrarToast } from '../components/notificaciones';
 
-const useInactividad = (minutos) => {
+// Vigila la actividad en toda la app (se monta una sola vez en App.jsx).
+// Cada movimiento, tecla, toque o scroll renueva la sesión; si pasan 2 minutos
+// sin nada, se cierra y se manda al login.
+const useInactividad = () => {
   const navigate = useNavigate();
+  const ultimoRegistro = useRef(0);
 
   useEffect(() => {
-    let temporizador;
-
-    const cerrarSesionPorInactividad = () => {
-      localStorage.removeItem('usuario_safestock');
-      localStorage.removeItem('solicitud_materiales_safe');
-      alert("Por seguridad, tu sesión ha sido cerrada por inactividad.");
-      navigate('/');
+    const alActuar = () => {
+      // Escribir en localStorage como mucho cada 5 s
+      if (Date.now() - ultimoRegistro.current > 5000) {
+        ultimoRegistro.current = Date.now();
+        registrarActividad();
+      }
     };
 
-    const reiniciarTemporizador = () => {
-      clearTimeout(temporizador);
-      temporizador = setTimeout(cerrarSesionPorInactividad, minutos * 60 * 1000);
+    const revisar = () => {
+      if (localStorage.getItem('usuario_safestock') && sesionExpirada()) {
+        cerrarSesion();
+        mostrarToast('Por seguridad, tu sesión se cerró por inactividad.', 'error');
+        navigate('/', { replace: true });
+      }
     };
 
-    // Escuchamos cualquier señal de vida del usuario
-    window.addEventListener('mousemove', reiniciarTemporizador);
-    window.addEventListener('keydown', reiniciarTemporizador);
-    window.addEventListener('touchstart', reiniciarTemporizador);
-    window.addEventListener('scroll', reiniciarTemporizador);
+    const eventos = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
+    eventos.forEach((ev) => window.addEventListener(ev, alActuar, { passive: true }));
+    const intervalo = setInterval(revisar, 5000);
+    // Si cerraron sesión en otra pestaña, también salimos aquí
+    const alCambiarStorage = (e) => {
+      if (e.key === 'usuario_safestock' && !e.newValue) navigate('/', { replace: true });
+    };
+    window.addEventListener('storage', alCambiarStorage);
 
-    reiniciarTemporizador();
+    if (obtenerSesion()) alActuar();
 
-    // Limpiamos la memoria si el componente desaparece
     return () => {
-      clearTimeout(temporizador);
-      window.removeEventListener('mousemove', reiniciarTemporizador);
-      window.removeEventListener('keydown', reiniciarTemporizador);
-      window.removeEventListener('touchstart', reiniciarTemporizador);
-      window.removeEventListener('scroll', reiniciarTemporizador);
+      eventos.forEach((ev) => window.removeEventListener(ev, alActuar));
+      window.removeEventListener('storage', alCambiarStorage);
+      clearInterval(intervalo);
     };
-  }, [navigate, minutos]);
+  }, [navigate]);
 };
 
 export default useInactividad;

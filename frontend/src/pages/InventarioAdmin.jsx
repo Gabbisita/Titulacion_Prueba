@@ -25,7 +25,7 @@ const InventarioAdmin = () => {
   // --- 1. LECTURA (GET): Cargar datos al entrar ---
   const obtenerMateriales = async () => {
     try {
-      const respuesta = await fetch('http://localhost:5000/api/admin/materiales');
+      const respuesta = await fetch('/backend/api/admin/materiales');
       const data = await respuesta.json();
       setMateriales(data);
     } catch (error) {
@@ -131,11 +131,11 @@ const InventarioAdmin = () => {
     }
 
     try {
-      let url = 'http://localhost:5000/api/admin/materiales';
+      let url = '/backend/api/admin/materiales';
       let metodo = 'POST';
 
       if (modoEdicion) {
-        url = `http://localhost:5000/api/admin/materiales/${formData.ID_Material}`;
+        url = `/backend/api/admin/materiales/${formData.ID_Material}`;
         metodo = 'PUT'; 
       }
 
@@ -161,7 +161,7 @@ const InventarioAdmin = () => {
   const eliminarMaterial = async (id) => {
     if (window.confirm('¿Estás seguro de que deseas dar de baja este material del inventario? Esta acción no se puede deshacer.')) {
       try {
-        const respuesta = await fetch(`http://localhost:5000/api/admin/materiales/${id}`, { method: 'DELETE' });
+        const respuesta = await fetch(`/backend/api/admin/materiales/${id}`, { method: 'DELETE' });
         const resultado = await respuesta.json();
         
         if (resultado.status === 'success') {

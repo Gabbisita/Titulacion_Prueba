@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import AnimatedPage from '../components/AnimatedPage';
+import { mostrarToast } from '../components/notificaciones';
 
 const DetalleMaterial = () => {
   const navigate = useNavigate();
@@ -13,7 +14,7 @@ const DetalleMaterial = () => {
   useEffect(() => {
     const obtenerMaterial = async () => {
       try {
-        const response = await fetch(`http://localhost:5000/api/materiales/${id}`);
+        const response = await fetch(`/backend/api/materiales/${id}`);
         
         if (response.ok) {
           const item = await response.json();
@@ -56,7 +57,12 @@ const DetalleMaterial = () => {
     const existeIndex = actuales.findIndex(item => item.id === material.id);
 
     if (existeIndex >= 0) {
-      actuales[existeIndex].cantidad += cantidad;
+      const nuevaCantidad = actuales[existeIndex].cantidad + cantidad;
+      if (nuevaCantidad > material.d) {
+        mostrarToast(`Solo hay ${material.d} unidades de ${material.n}; ya tienes ${actuales[existeIndex].cantidad} en el carrito.`, 'error');
+        return;
+      }
+      actuales[existeIndex].cantidad = nuevaCantidad;
     } else {
       actuales.push({
         id: material.id,
@@ -67,6 +73,7 @@ const DetalleMaterial = () => {
     }
 
     localStorage.setItem('solicitud_materiales_safe', JSON.stringify(actuales));
+    mostrarToast(`Se agregó ${cantidad} × ${material.n} al carrito`);
     // AQUÍ ESTÁ EL CAMBIO CLAVE: Te regresa a la página de inventario
     navigate('/inventario'); 
   };

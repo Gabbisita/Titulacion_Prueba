@@ -19,6 +19,10 @@ import UsuariosAdmin from './pages/UsuariosAdmin';
 import CasillerosAdmin from './pages/CasillerosAdmin';
 import EstadisticasAdmin from './pages/EstadisticasAdmin';
 import FallasAdmin from './pages/FallasAdmin';
+import VerificarQR from './pages/VerificarQR';
+import Toaster from './components/Toast';
+import RutaProtegida from './components/RutaProtegida';
+import useInactividad from './hooks/useInactividad';
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -28,32 +32,40 @@ function ScrollToTop() {
   return null;
 }
 
+function VigilanteSesion() {
+  useInactividad();
+  return null;
+}
+
 function App() {
   return (
     <Router>
       <ScrollToTop />
+      <Toaster />
+      <VigilanteSesion />
       <Routes>
 
         <Route path="/" element={<Login />} />
         {/* Atrapa al "fantasma" que manda a /login */}
         <Route path="/login" element={<Login />} />
         
-        <Route path="/inicio" element={<Inicio />} />
-        <Route path="/inventario" element={<Inventario />} />
-        <Route path="/material/:id" element={<DetalleMaterial />} />
-        <Route path="/carrito" element={<Carrito />} />
-        <Route path="/solicitud" element={<Solicitud />} />
-        <Route path="/pedidos" element={<Pedidos />} />
-        <Route path="/pedido/:id" element={<DetallePedido />} />
+        <Route path="/inicio" element={<RutaProtegida rol="alumno"><Inicio /></RutaProtegida>} />
+        <Route path="/inventario" element={<RutaProtegida rol="alumno"><Inventario /></RutaProtegida>} />
+        <Route path="/material/:id" element={<RutaProtegida rol="alumno"><DetalleMaterial /></RutaProtegida>} />
+        <Route path="/carrito" element={<RutaProtegida rol="alumno"><Carrito /></RutaProtegida>} />
+        <Route path="/solicitud" element={<RutaProtegida rol="alumno"><Solicitud /></RutaProtegida>} />
+        <Route path="/pedidos" element={<RutaProtegida rol="alumno"><Pedidos /></RutaProtegida>} />
+        <Route path="/pedido/:id" element={<RutaProtegida rol="alumno"><DetallePedido /></RutaProtegida>} />
         <Route path="/registro" element={<Registro />} />
-        <Route path="/inicioadmin" element={<InicioAdmin/>}/>
-        <Route path="/pedidosadmin" element={<PedidosAdmin/>}/>
-        <Route path="/admin/asignar-casillero" element={<AsignarCasillero />} />
-        <Route path="/admin/inventario" element={<InventarioAdmin />} />
-        <Route path="/admin/usuarios" element={<UsuariosAdmin />} />
-        <Route path="/admin/casilleros" element={<CasillerosAdmin />} />
-        <Route path="/admin/estadisticas" element={<EstadisticasAdmin />} />
-        <Route path="/admin/fallas" element={<FallasAdmin />} />
+        <Route path="/inicioadmin" element={<RutaProtegida rol="admin"><InicioAdmin/></RutaProtegida>} />
+        <Route path="/pedidosadmin" element={<RutaProtegida rol="admin"><PedidosAdmin/></RutaProtegida>} />
+        <Route path="/admin/asignar-casillero" element={<RutaProtegida rol="admin"><AsignarCasillero /></RutaProtegida>} />
+        <Route path="/admin/inventario" element={<RutaProtegida rol="admin"><InventarioAdmin /></RutaProtegida>} />
+        <Route path="/admin/usuarios" element={<RutaProtegida rol="admin"><UsuariosAdmin /></RutaProtegida>} />
+        <Route path="/admin/casilleros" element={<RutaProtegida rol="admin"><CasillerosAdmin /></RutaProtegida>} />
+        <Route path="/admin/estadisticas" element={<RutaProtegida rol="admin"><EstadisticasAdmin /></RutaProtegida>} />
+        <Route path="/admin/fallas" element={<RutaProtegida rol="admin"><FallasAdmin /></RutaProtegida>} />
+        <Route path="/admin/verificar-qr" element={<RutaProtegida rol="admin"><VerificarQR /></RutaProtegida>} />
       </Routes>
     </Router>
   );

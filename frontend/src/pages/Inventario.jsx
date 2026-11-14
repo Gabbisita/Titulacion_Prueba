@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import AnimatedPage from '../components/AnimatedPage';
+import { mostrarToast } from '../components/notificaciones';
 
 const Inventario = () => {
   const navigate = useNavigate();
@@ -14,7 +15,7 @@ const Inventario = () => {
   useEffect(() => {
     const obtenerMateriales = async () => {
       try {
-        const response = await fetch('http://localhost:5000/api/materiales');
+        const response = await fetch('/backend/api/materiales');
         const data = await response.json();
 
         const inventarioReal = data.map((item) => {
@@ -57,7 +58,7 @@ const Inventario = () => {
       if (carrito[index].cantidad < m.d){
         carrito[index].cantidad += 1;
       }else{
-        alert(`Solo hay ${m.d} unidades disponibles de este material.`);
+        mostrarToast(`Solo hay ${m.d} unidades disponibles de ${m.n}.`, 'error');
         return;
       }
     } else {
@@ -70,9 +71,7 @@ const Inventario = () => {
     }
 
     localStorage.setItem('solicitud_materiales_safe', JSON.stringify(carrito));
-    
-    // Opcional: Una pequeña alerta nativa, aunque el Navbar se actualizará solo
-    // alert(`Agregaste 1x ${m.n} al carrito`);
+    mostrarToast(`Se agregó 1 × ${m.n} al carrito`);
   };
 
   const filtrados = materiales.filter(m => 

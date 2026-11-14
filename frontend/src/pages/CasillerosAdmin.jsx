@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import NavbarAdmin from '../components/NavbarAdmin';
 import AnimatedPage from '../components/AnimatedPage';
+import { mostrarToast } from '../components/notificaciones';
 
 const CasillerosAdmin = () => {
   const [casilleros, setCasilleros] = useState([]);
@@ -18,7 +19,7 @@ const CasillerosAdmin = () => {
   // --- 1. CARGAR MAPA ---
   const obtenerCasilleros = async () => {
     try {
-      const respuesta = await fetch('http://localhost:5000/api/casilleros');
+      const respuesta = await fetch('/backend/api/casilleros');
       const data = await respuesta.json();
 
       const mapaCasilleros = data.map((celda) => {
@@ -28,7 +29,7 @@ const CasillerosAdmin = () => {
 
         return {
           id: celda.ID_Casillero,
-          nombre: celda.Nombre || `Celda 0${celda.ID_Casillero}`, 
+          nombre: celda.Identificador || `Celda ${String(celda.ID_Casillero).padStart(2, '0')}`, 
           estado: estadoNumerico
         };
       });
@@ -51,7 +52,7 @@ const CasillerosAdmin = () => {
     // SI ESTÁ OCUPADO (2), buscamos quién está adentro
     if (casillero.estado === 2) {
       try {
-        const res = await fetch(`http://localhost:5000/api/admin/casilleros/${casillero.id}/pedido`);
+        const res = await fetch(`/backend/api/admin/casilleros/${casillero.id}/pedido`);
         const data = await res.json();
         if (data) setPedidoActivo(data);
       } catch (error) {
@@ -72,17 +73,22 @@ const CasillerosAdmin = () => {
     e.preventDefault();
     setProcesando(true);
     try {
-      const respuesta = await fetch(`http://localhost:5000/api/admin/casilleros/${casilleroSeleccionado.id}/estado`, {
+      const respuesta = await fetch(`/backend/api/admin/casilleros/${casilleroSeleccionado.id}/estado`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nuevo_estado: parseInt(nuevoEstado) })
       });
+      const resultado = await respuesta.json().catch(() => ({}));
       if (respuesta.ok) {
+        mostrarToast(`${casilleroSeleccionado.nombre} actualizada.`);
         obtenerCasilleros();
         cerrarModal();
+      } else {
+        mostrarToast(resultado.message || 'No se pudo actualizar el casillero.', 'error');
+        obtenerCasilleros();
       }
-    } catch (error) {
-      alert("Error de conexión.");
+    } catch {
+      mostrarToast("Error de conexión.", 'error');
     } finally {
       setProcesando(false);
     }
@@ -94,7 +100,7 @@ const CasillerosAdmin = () => {
     
     setProcesando(true);
     try {
-      const respuesta = await fetch(`http://localhost:5000/api/admin/casilleros/${casilleroSeleccionado.id}/liberar`, {
+      const respuesta = await fetch(`/backend/api/admin/casilleros/${casilleroSeleccionado.id}/liberar`, {
         method: 'PUT'
       });
       const resultado = await respuesta.json();

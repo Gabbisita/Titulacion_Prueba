@@ -1,7 +1,10 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { iniciarSesion, obtenerSesion, rutaInicio } from '../auth/sesion';
+import { useNavigate, Link, Navigate } from 'react-router-dom';
 import { loginUser } from '../services/authService';
 import AnimatedPage from '../components/AnimatedPage';
+import Logo from '../components/Logo';
+import RecuperarPassword from '../components/RecuperarPassword';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -9,6 +12,10 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [recuperarAbierto, setRecuperarAbierto] = useState(false);
+
+  // Si ya hay una sesión activa, no mostramos el login
+  const sesionActiva = obtenerSesion();
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -21,8 +28,7 @@ const Login = () => {
       console.log("Respuesta secreta del backend:", data);
 
       if (data.status === "success" || data.user) {
-        localStorage.setItem('usuario_safestock', JSON.stringify(data.user));
-        localStorage.setItem('rol_safestock', data.role || 'alumno');
+        iniciarSesion(data.user, data.role || 'alumno');
 
 
         if (data.role === 'admin'){
@@ -44,6 +50,8 @@ const Login = () => {
     }
   };
 
+  if (sesionActiva) return <Navigate to={rutaInicio(sesionActiva.rol)} replace />;
+
   return (
     <AnimatedPage>
       <div className="flex h-screen w-full bg-[#0a0f1d] overflow-hidden font-sans text-white text-left">
@@ -52,9 +60,7 @@ const Login = () => {
           
           <div className="relative z-10">
             <div className="flex items-center gap-4 mb-16 text-left">
-              <div className="w-14 h-14 bg-[#2563eb] rounded-2xl flex items-center justify-center shadow-2xl shadow-blue-900/50">
-                <span className="text-white font-black text-3xl">C</span>
-              </div>
+              <Logo tamano="lg" />
               <div className="text-xs text-slate-400 font-bold uppercase tracking-[0.2em] leading-tight text-left">
                 CETI División de Ingeniería<br/>Mecatrónica
               </div>
@@ -112,7 +118,7 @@ const Login = () => {
                   <label className="text-[11px] font-black text-slate-800 uppercase tracking-[0.15em] text-left">
                     Contraseña
                   </label>
-                  <button type="button" className="text-xs font-bold text-blue-600 hover:text-blue-700">
+                  <button type="button" onClick={() => setRecuperarAbierto(true)} className="text-xs font-bold text-blue-600 hover:text-blue-700">
                     ¿Olvidaste tu contraseña?
                   </button>
                 </div>
@@ -151,6 +157,12 @@ const Login = () => {
         </div>
 
       </div>
+      <RecuperarPassword
+        key={recuperarAbierto ? 'abierto' : 'cerrado'}
+        abierto={recuperarAbierto}
+        onCerrar={() => setRecuperarAbierto(false)}
+        emailInicial={email}
+      />
     </AnimatedPage>
   );
 };

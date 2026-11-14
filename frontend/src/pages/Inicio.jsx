@@ -1,32 +1,44 @@
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import AnimatedPage from '../components/AnimatedPage';
-
-import osciloscopio from '../assets/osciloscopio.jpg';
+import Logo from '../components/Logo';
 
 const Inicio = () => {
   const navigate = useNavigate(); 
+  const [populares, setPopulares] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState(false);
 
-  const recientes = [
-    { id: 1, n: 'Fuente variadora', i: '🔬' , d: 24, e: 'EN STOCK' }, 
-    { id: 2, n: 'Multímetro Digital', i: '🔬', d: 11, e: 'EN STOCK' },
-    { id: 3, n: 'Osciloscopio', i: osciloscopio, d: 0, e: 'AGOTADO' },
-    { id: 4, n: 'Martillo', i: '🔨', d: 7, e: 'EN STOCK' }
-  ];
+  // Los 4 materiales que más se han pedido (según la base de datos)
+  useEffect(() => {
+    fetch('/backend/api/materiales-populares?limite=4')
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) =>
+        setPopulares(
+          data.map((item) => ({
+            id: item.ID_Material,
+            n: item.Nombre,
+            d: item.Cantidad,
+            veces: item.Veces_Solicitado,
+            e: item.Cantidad > 0 ? 'EN STOCK' : 'AGOTADO',
+            i: `/images/${item.ID_Material}.jpg`,
+          }))
+        )
+      )
+      .catch(() => setError(true))
+      .finally(() => setCargando(false));
+  }, []);
 
-  const renderVisual = (src) => {
-    if (typeof src !== 'string' || src.includes('/') || src.includes('static')) {
-      return (
-        <img 
-          src={src} 
-          alt="material" 
-          className="w-full h-full object-cover" 
-        />
-      );
-    }
-    return src;
-  };
+  const renderVisual = (src) => (
+    <img
+      src={src}
+      alt="material"
+      className="w-full h-full object-cover"
+      onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement.textContent = '📦'; }}
+    />
+  );
 
   return (
     <AnimatedPage>
@@ -42,13 +54,16 @@ const Inicio = () => {
             Explorar catálogo →
           </Link>
         </div>
+        <div className="hidden lg:block absolute right-20 top-1/2 -translate-y-1/2 z-10">
+          <Logo tamano="xl" className="drop-shadow-2xl" />
+        </div>
       </section>
 
       <section className="py-20 px-20 max-w-7xl mx-auto">
         <div className="flex justify-between items-end mb-12">
           <div className="text-left">
-            <h2 className="text-3xl font-black text-[#1a1f2e] italic uppercase tracking-tighter">Recién agregados</h2>
-            <p className="text-slate-400 font-bold">Materiales disponibles para préstamo</p>
+            <h2 className="text-3xl font-black text-[#1a1f2e] italic uppercase tracking-tighter">Más solicitados</h2>
+            <p className="text-slate-400 font-bold">Los materiales que más piden tus compañeros</p>
           </div>
         
           <Link 
@@ -61,7 +76,13 @@ const Inicio = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-          {recientes.map((m) => (
+          {cargando && [0, 1, 2, 3].map((k) => (
+            <div key={k} className="bg-white p-8 rounded-4xl border border-slate-100 h-80 animate-pulse" />
+          ))}
+          {error && (
+            <p className="col-span-full text-center text-slate-400 font-bold py-10">No se pudieron cargar los materiales. Intenta recargar la página.</p>
+          )}
+          {populares.map((m) => (
             <motion.div 
               key={m.id} 
               whileHover={{ scale: 1.05 }}
@@ -75,6 +96,9 @@ const Inicio = () => {
               <h3 className="font-black text-lg text-[#1a1f2e] uppercase italic mb-4 leading-tight min-h-12 flex items-center">
                 {m.n}
               </h3>
+              <p className="text-slate-400 font-bold text-xs mb-3">
+                {m.veces > 0 ? `Pedido ${m.veces} ${m.veces === 1 ? 'vez' : 'veces'}` : 'Aún sin pedidos'} · {m.d} disponibles
+              </p>
               <span className={`px-4 py-1.5 rounded-full text-[9px] font-black tracking-widest ${
                 m.e === 'EN STOCK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
               }`}>

@@ -1,13 +1,14 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { cerrarSesion } from '../auth/sesion';
+import Logo from './Logo';
 
 const NavbarAdmin = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
   const handleLogout = () => {
-    localStorage.removeItem('usuario_safestock');
-    localStorage.removeItem('rol_safestock');
-    window.location.href = '/';
+    cerrarSesion();
+    navigate('/', { replace: true });
   };
 
   const linkClass = (path) => {
@@ -20,7 +21,7 @@ const NavbarAdmin = () => {
   return (
     <nav className="bg-[#0a0f1d] border-b border-white/10 px-6 py-4 md:px-12 flex items-center justify-between sticky top-0 z-50">
       <div className="flex items-center gap-4">
-        <Link to="/admin" className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center font-black text-xl shadow-lg">C</Link>
+        <Link to="/inicioadmin" aria-label="Inicio"><Logo /></Link>
         <div className="hidden md:block text-left">
           <p className="text-white font-black text-xs uppercase">SafeStock Administrador</p>
           <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest mt-0.5">CETI Mecatrónica</p>

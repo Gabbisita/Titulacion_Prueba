@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import useInactividad from '../hooks/useInactividad';
+import { cerrarSesion as borrarSesion } from '../auth/sesion';
+import Logo from './Logo';
 
 const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate(); // <-- Agregamos el hook para poder redirigir
 
-  useInactividad(5);
 
   const [cantidadCarrito, setCantidadCarrito] = useState(0);
 
@@ -29,9 +29,8 @@ const Navbar = () => {
 
   // --- FUNCIÓN DE CERRAR SESIÓN ---
   const cerrarSesion = () => {
-    localStorage.removeItem('usuario_safestock');
-    localStorage.removeItem('solicitud_materiales_safe'); // Limpiamos el carrito por seguridad
-    navigate('/'); // Mandamos al usuario a la pantalla de Login
+    borrarSesion(); // Borra usuario, rol y carrito
+    navigate('/', { replace: true });
   };
 
   const linkClass = (path) => {
@@ -43,7 +42,7 @@ const Navbar = () => {
   return (
     <nav className="bg-[#0a0f1d] border-b border-white/10 px-6 py-4 md:px-12 flex items-center justify-between sticky top-0 z-50">
       <div className="flex items-center gap-4">
-        <Link to="/inicio" className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center font-black text-xl shadow-lg">C</Link>
+        <Link to="/inicio" aria-label="Inicio"><Logo /></Link>
         <div className="hidden md:block text-left">
           <p className="text-white font-black text-xs uppercase">CETI División de Ingeniería</p>
           <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest mt-0.5">Mecatrónica</p>

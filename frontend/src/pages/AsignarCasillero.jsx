@@ -15,10 +15,9 @@ const AsignarCasillero = () => {
   const [casilleros, setCasilleros] = useState([]); // Inicia vacío mientras carga de la BD
 
   // --- 1. LEER LOS CASILLEROS DESDE LA BASE DE DATOS ---
-  useEffect(() => {
-    const obtenerCasilleros = async () => {
+  const obtenerCasilleros = async () => {
       try {
-        const respuesta = await fetch('http://localhost:5000/api/casilleros');
+        const respuesta = await fetch('/backend/api/casilleros');
         const data = await respuesta.json();
 
         const mapaCasilleros = data.map((celda) => {
@@ -32,7 +31,7 @@ const AsignarCasillero = () => {
 
           return {
             id: celda.ID_Casillero,
-            nombre: celda.Nombre || `Celda 0${celda.ID_Casillero}`, 
+            nombre: celda.Identificador || `Celda ${String(celda.ID_Casillero).padStart(2, '0')}`, 
             estado: estadoNumerico
           };
         });
@@ -43,6 +42,7 @@ const AsignarCasillero = () => {
       }
     };
 
+  useEffect(() => {
     obtenerCasilleros();
   }, []);
 
@@ -56,7 +56,7 @@ const AsignarCasillero = () => {
     setProcesando(true);
     
     try {
-      const response = await fetch(`http://localhost:5000/api/admin/pedidos/${pedidoId}/aprobar`, {
+      const response = await fetch(`/backend/api/admin/pedidos/${pedidoId}/aprobar`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         // IMPORTANTE: id_casillero en minúsculas para que Node.js lo detecte correctamente
@@ -71,6 +71,9 @@ const AsignarCasillero = () => {
         navigate('/pedidosadmin');
       } else {
         alert(`Ocurrió un problema: ${resultado.message}`);
+        // Si alguien ocupó ese casillero mientras tanto, recargamos el mapa real
+        setCasilleroSeleccionado(null);
+        obtenerCasilleros();
         setProcesando(false);
       }
     } catch (error) {

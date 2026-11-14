@@ -7,7 +7,7 @@ import { mockEstadisticas, mockInventario } from '../data/mockEstadisticas';
 // =======================================================
 export const USAR_MOCK = false;
 
-export const API_URL = 'http://localhost:5000';
+export const API_URL = '/backend';
 
 // mes: 'AAAA-MM' · el reporte siempre cubre un solo mes
 export const obtenerEstadisticas = async (mes) => {
@@ -40,7 +40,10 @@ export const nombreMes = (mes = '') => {
   return `${MESES[parseInt(numero, 10) - 1] || mes} ${anio || ''}`.trim();
 };
 
-// Por defecto se reporta el último mes cerrado
+// Mes en curso (lo que se muestra al entrar a Estadísticas)
+export const mesActual = () => aClaveMes(new Date());
+
+// Último mes cerrado
 export const mesAnterior = () => {
   const fecha = new Date();
   fecha.setDate(1);

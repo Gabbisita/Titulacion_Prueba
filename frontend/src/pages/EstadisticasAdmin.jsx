@@ -4,11 +4,11 @@ import NavbarAdmin from '../components/NavbarAdmin';
 import AnimatedPage from '../components/AnimatedPage';
 import { BarraHorizontal, Columnas, Dona } from '../components/Graficas';
 import {
-  USAR_MOCK, obtenerEstadisticas, obtenerInventario, nombreMes, mesAnterior, ultimosMeses, fallasDelMes,
+  USAR_MOCK, obtenerEstadisticas, obtenerInventario, nombreMes, mesActual, ultimosMeses, fallasDelMes,
   obtenerHoraPico, obtenerSemestresTop, obtenerTasaAprobacion, obtenerVariacion, obtenerResumenFallas,
 } from '../services/estadisticasService';
 import { obtenerFallas } from '../services/fallasService';
-import { generarReporteCoordinacion } from '../utils/reportePDF';
+import { generarReporteCoordinacion, cargarLogo } from '../utils/reportePDF';
 import { TEXTO } from '../utils/paletaGraficas';
 
 // Tarjeta blanca con título, igual a las demás del panel
@@ -29,7 +29,7 @@ const TituloSeccion = ({ titulo, descripcion }) => (
 
 const EstadisticasAdmin = () => {
   const navigate = useNavigate();
-  const [mes, setMes] = useState(mesAnterior());
+  const [mes, setMes] = useState(mesActual());
   const [estadisticas, setEstadisticas] = useState(null);
   const [inventario, setInventario] = useState([]);
   const [fallas, setFallas] = useState([]);
@@ -67,10 +67,11 @@ const EstadisticasAdmin = () => {
   const fallasMes = fallasDelMes(fallas, mes);
 
   // --- 3. DESCARGAR PDF ---
-  const descargarReporte = () => {
+  const descargarReporte = async () => {
     setGenerando(true);
     try {
-      generarReporteCoordinacion(estadisticas, inventario, fallasMes);
+      const logo = await cargarLogo();
+      generarReporteCoordinacion(estadisticas, inventario, fallasMes, logo);
     } catch (err) {
       console.error("Error al generar el PDF:", err);
       alert("No se pudo generar el reporte.");

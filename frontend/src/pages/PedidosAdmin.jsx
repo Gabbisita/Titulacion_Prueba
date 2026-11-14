@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import NavbarAdmin from '../components/NavbarAdmin';
 import AnimatedPage from '../components/AnimatedPage';
+import { mostrarToast } from '../components/notificaciones';
 
 const PedidosAdmin = () => {
   const navigate = useNavigate();
@@ -20,7 +21,7 @@ const PedidosAdmin = () => {
   useEffect(() => {
     const obtenerPedidos = async () => {
       try {
-        const respuesta = await fetch('http://localhost:5000/api/admin/pedidos');
+        const respuesta = await fetch('/backend/api/admin/pedidos');
         const data = await respuesta.json();
 
         console.log("Lo que mandó Express:", data);
@@ -57,19 +58,20 @@ const confirmarRechazo = async () => {
     }
 
     try {
-      const respuesta = await fetch(`http://localhost:5000/api/admin/pedidos/${pedidoSeleccionado}/rechazar`, {
+      const respuesta = await fetch(`/backend/api/admin/pedidos/${pedidoSeleccionado}/rechazar`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        // Mandamos el motivo por si en el futuro decides crear una columna "Notas" en tu tabla pedido
         body: JSON.stringify({ motivo: motivoRechazo }) 
       });
 
+      const resultado = await respuesta.json().catch(() => ({}));
       if (respuesta.ok) {
         // Solo si la base de datos confirmó el cambio, lo quitamos de la pantalla
         setPedidos(pedidos.filter(p => p.id !== pedidoSeleccionado));
         setModalAbierto(false);
+        mostrarToast('Pedido rechazado. Se envió el motivo por correo al alumno.');
       } else {
-        alert("Hubo un error al intentar rechazar el pedido en la base de datos.");
+        alert(resultado.message || "Hubo un error al intentar rechazar el pedido en la base de datos.");
       }
     } catch (error) {
       console.error("Error de conexión:", error);
@@ -223,6 +225,7 @@ const confirmarRechazo = async () => {
 
               <textarea 
                 placeholder="Ej. Material en mantenimiento, propósito no válido, etc."
+                maxLength={500}
                 value={motivoRechazo}
                 onChange={(e) => setMotivoRechazo(e.target.value)}
                 className="w-full h-32 p-4 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100 resize-none mb-6"

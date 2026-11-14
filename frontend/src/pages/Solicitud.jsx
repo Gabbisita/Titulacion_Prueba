@@ -98,7 +98,7 @@ const Solicitud = () => {
     }
 
     try {
-      const respuesta = await fetch(`http://localhost:5000/api/alumnos/buscar?q=${texto}`);
+      const respuesta = await fetch(`/backend/api/alumnos/buscar?q=${texto}`);
       const data = await respuesta.json();
       
       // Obtenemos el registro del usuario actual (el líder) para excluirlo
@@ -168,7 +168,7 @@ const Solicitud = () => {
     };
 
     try {
-      const respuesta = await fetch('http://localhost:5000/api/pedidos', {
+      const respuesta = await fetch('/backend/api/pedidos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(paqueteDatos)

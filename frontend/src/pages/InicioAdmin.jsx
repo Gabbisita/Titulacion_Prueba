@@ -2,6 +2,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import NavbarAdmin from '../components/NavbarAdmin';
 import AnimatedPage from '../components/AnimatedPage';
+import Logo from '../components/Logo';
 
 const InicioAdmin = () => {
   const navigate = useNavigate(); 
@@ -56,6 +57,14 @@ const InicioAdmin = () => {
       ruta: '/admin/fallas'
     },
 
+    {
+      id: 'verificar-qr',
+      titulo: 'Verificar QR',
+      icono: '🔐',
+      descripcion: 'Escanee el código QR cifrado de un alumno para confirmar que es auténtico y a qué casillero corresponde.',
+      ruta: '/admin/verificar-qr'
+    },
+
 
   ];
 
@@ -71,6 +80,9 @@ const InicioAdmin = () => {
           <div className="relative z-10 text-left"> 
             <h1 className="text-8xl font-black italic tracking-tighter mb-6 leading-none uppercase">SAFE STOCK</h1>
             <p className="text-slate-400 text-xl max-w-md mb-10 italic">Panel de Control General · Almacenista</p>
+          </div>
+          <div className="hidden lg:block absolute right-20 top-1/2 -translate-y-1/2 z-10">
+            <Logo tamano="xl" className="drop-shadow-2xl" />
           </div>
         </section>
 
