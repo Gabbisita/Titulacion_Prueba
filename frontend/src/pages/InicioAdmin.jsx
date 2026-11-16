@@ -65,6 +65,14 @@ const InicioAdmin = () => {
       ruta: '/admin/verificar-qr'
     },
 
+    {
+      id: 'bitacora',
+      titulo: 'Bitácora de seguridad',
+      icono: '🛡️',
+      descripcion: 'Revise los inicios de sesión, accesos negados e intentos sospechosos detectados por el sistema.',
+      ruta: '/admin/bitacora'
+    },
+
 
   ];
 

@@ -1,224 +1,128 @@
+const config = require('./config'); // valida backend/.env antes que nada
 const express = require('express');
-const db = require('./db');
+const helmet = require('helmet');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 const bcrypt = require('bcrypt');
-const multer = require('multer'); // <-- NUEVO: Librería para subir archivos
+const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
+
+const { consultar, transaccion } = require('./db');
+const { registrar } = require('./bitacora');
+const { ErrorHttp, esquemas, leer } = require('./validacion');
+const seg = require('./seguridad');
+const { cicloActual, semestreSugerido } = require('./semestres');
 const { correoBienvenida, correoPedido, correoRecuperacion, correoAprobado, correoRechazado, correoPase } = require('./mailer');
-const { leerToken, qrDataUrl, qrBuffer } = require('./qrSeguro');     // <-- NUEVO: Librería para manejar rutas de carpetas
+const { leerToken, qrDataUrl, qrBuffer } = require('./qrSeguro');
 
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: '1mb' }));
+
+// El frontend llega por el proxy de Vite (misma máquina). Con esto req.ip es la IP
+// real del visitante y no 127.0.0.1; solo se confía en proxies locales.
+app.set('trust proxy', 'loopback');
 
 // =======================================================
-// CONFIGURACIÓN DE MULTER (GUARDADO FÍSICO DE IMÁGENES)
+// CAPAS DE SEGURIDAD (se aplican a TODAS las peticiones, en este orden)
 // =======================================================
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        // Apuntamos directamente a la carpeta del frontend
-        cb(null, path.join(__dirname, '../frontend/public/images')); 
-    },
-    filename: (req, file, cb) => {
-        // Tomamos el ID que viene en el formulario (POST) o en la URL (PUT)
-        const idMaterial = req.body.ID_Material || req.params.id; 
-        cb(null, `${idMaterial}.jpg`); // Forzamos a que se guarde como .jpg
-    }
-});
-const upload = multer({ storage: storage });
-
-
-// --- VENTANILLA 1: LOGIN INTELIGENTE (ADMINISTRADOR Y ALUMNO) ---
-app.post('/', (req, res) => {
-    const { email, password } = req.body;
-
-    // 1. Primero buscamos si el correo es del Jefe (Administrador)
-    const queryAdmin = "SELECT * FROM administrador WHERE Email = ?";
-
-    db.query(queryAdmin, [email], (err, resultAdmin) => {
-        if (err) return res.status(500).json({ error: err.message });
-
-        if (resultAdmin.length > 0) {
-            const admin = resultAdmin[0]; 
-
-            bcrypt.compare(password, admin.Password, (err, coinciden) => {
-                if (err) return res.status(500).json({ error: "Error interno de seguridad" });
-
-                if (coinciden) {
-                    return res.status(200).json({ status: "success", role: "admin", user: admin });
-                } else {
-                    return res.status(401).json({ status: "error", message: "Contraseña incorrecta" });
-                }
-            });
-        } else {
-            // 2. Si NO es administrador, entonces buscamos en la tabla de alumnos
-            const queryAlumno = "SELECT * FROM alumno WHERE Email = ?";
-            
-            db.query(queryAlumno, [email], (err, resultAlumno) => {
-                if (err) return res.status(500).json({ error: err.message });
-
-                if (resultAlumno.length > 0) {
-                    const alumno = resultAlumno[0];
-
-                    if (!alumno.Password) {
-                        return res.status(401).json({ status: "error", message: "Esta cuenta no tiene contraseña registrada. Contacta al administrador." });
-                    }
-
-                    bcrypt.compare(password, alumno.Password, (err, coinciden) => {
-                        if (err) return res.status(500).json({ error: "Error interno de seguridad" });
-
-                        if (coinciden) {
-                            return res.status(200).json({ status: "success", role: "alumno", user: alumno });
-                        } else {
-                            return res.status(401).json({ status: "error", message: "Contraseña incorrecta" });
-                        }
-                    });
-                } else {
-                    return res.status(401).json({ status: "error", message: "Correo no registrado" });
-                }
-            });
-        }
-    });
-});
-
-// --- VENTANILLA 2: TODO EL CATÁLOGO ---
-app.get('/api/materiales', (req, res) => {
-    const query = 'SELECT * FROM material';
-
-    db.query(query, (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.status(200).json(results);
-    });
-});
-
-// --- VENTANILLA 3: DETALLES DE UN SOLO MATERIAL ---
-app.get('/api/materiales/:id', (req, res) => {
-    const idMaterial = req.params.id; 
-    const query = 'SELECT * FROM material WHERE ID_Material = ?';
-
-    db.query(query, [idMaterial], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        
-        if (result.length > 0) {
-            res.status(200).json(result[0]); 
-        } else {
-            res.status(404).json({ message: "Material no encontrado" });
-        }
-    });
-});
-
-// --- VENTANILLA DE REGISTRO ---
-app.post('/registro', (req, res) => {
-    const { nombre, registro_alu, email, password, telefono, carrera_texto, semestre_texto } = req.body;
-
-    if (!/^[^\s@]+@ceti\.mx$/i.test(String(email || '').trim())) {
-        return res.status(400).json({ 
-            status: "error", 
-            message: "Por seguridad, solo se permiten correos institucionales (@ceti.mx)" 
-        });
-    }
-
-    const saltRounds = 10;
-    bcrypt.hash(password, saltRounds, (err, hashPassword) => {
-        if (err) return res.status(500).json({ error: "Error al encriptar" });
-
-        const query = `
-            INSERT INTO alumno (Nombre, Registro_Alu, Email, Password, Telefono, FK_Carrera, FK_Semestre) 
-            VALUES (
-                ?, ?, ?, ?, ?, 
-                (SELECT ID_Carrera FROM carrera WHERE Nombre_Carrera = ? LIMIT 1), 
-                (SELECT ID_Semestre FROM semestre WHERE Nombre_Semestre = ? LIMIT 1)
-            )
-        `;
-
-        db.query(query, [nombre, registro_alu, email, hashPassword, telefono, carrera_texto, semestre_texto], (err, result) => {
-            if (err) {
-                if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ status: "error", message: "Este alumno o correo ya está registrado." });
-                if (err.code === 'ER_BAD_NULL_ERROR') return res.status(400).json({ status: "error", message: "Error: La carrera o semestre seleccionados no son válidos." });
-                return res.status(500).json({ status: "error", message: err.message });
-            }
-            res.status(201).json({ status: "success", message: "Cuenta creada con éxito" });
-            correoBienvenida(email, nombre);
-        });
-    });
-});
-
-// --- VENTANILLA 4: REGISTRAR UN PEDIDO ---
-app.post('/api/pedidos', (req, res) => {
-    const { id_pedido, fecha_recogida, hora_recogida, hora_devolucion, proposito, solicitante, integrantes, materiales } = req.body;
-    const listaMatriculas = integrantes.map(i => i.matricula);
-
-    const queryValidar = `
-            SELECT ep.FK_Matricula, u.Nombre 
-            FROM equipo_pedido ep
-            JOIN pedido p ON ep.FK_Pedido = p.ID_Pedido
-            JOIN alumno u ON ep.FK_Matricula = u.Registro_Alu
-            WHERE p.Fecha_Recogida = ? 
-            AND ep.FK_Matricula IN (?)
-            AND p.FK_Estado IN (1, 2, 3); /* <-- LA MAGIA: Solo bloquea si tiene un pedido Pendiente (1) o Aprobado (2) */
-        `;
-
-    db.query(queryValidar, [fecha_recogida, listaMatriculas], (err, duplicados) => {
-        if (err) return res.status(500).json({ status: "error", message: "Error interno al verificar el equipo." });
-
-        if (duplicados.length > 0) {
-            const alumnoConflictivo = duplicados[0].Nombre;
-            return res.status(400).json({ 
-                status: "error", 
-                message: `${alumnoConflictivo} ya tiene una solicitud de material registrada para esta misma fecha.` 
-            });
-        }
-
-        const queryPedido = `
-            INSERT INTO pedido (ID_Pedido, Fecha_Solicitud, Fecha_Recogida, Proposito, FK_Solicitante, FK_Estado, Hora_Recogida, Hora_Devolucion) 
-            VALUES (?, NOW(), ?, ?, ?, 1, ?, ?);
-        `;
-
-        db.query(queryPedido, [id_pedido, fecha_recogida, proposito, solicitante, hora_recogida, hora_devolucion], (err, result) => {
-            if (err) return res.status(500).json({ status: "error", message: "Error al registrar la cabecera del pedido." });
-
-            const queryEquipo = `INSERT INTO equipo_pedido (FK_Pedido, FK_Matricula, Rol) VALUES ?`;
-            const valoresEquipo = integrantes.map(i => [
-                id_pedido, i.matricula, i.matricula === solicitante ? 'Líder' : 'Colaborador'
-            ]);
-
-            db.query(queryEquipo, [valoresEquipo], (err) => {
-                if (err) console.error("Error menor al guardar equipo:", err);
-
-                const queryDetalle = `INSERT INTO detalle_pedido (FK_Pedido, FK_Material, Cantidad) VALUES ?`;
-                const valoresDetalles = materiales.map(m => [id_pedido, m.id, m.cantidad]);
-
-                db.query(queryDetalle, [valoresDetalles], (err) => {
-                    if (err) return res.status(500).json({ status: "error", message: "Error al registrar los materiales." });
-                    res.status(200).json({ status: "success", message: "Pedido de equipo procesado con éxito." });
-                    notificarPedido(id_pedido, listaMatriculas, materiales, { fecha_recogida, hora_recogida, hora_devolucion, proposito });
-                });
-            });
-        });
-    });
-});
-
-// Manda el correo de confirmación a cada integrante del equipo (no bloquea la respuesta).
-function notificarPedido(idPedido, matriculas, materiales, datos) {
-    const ids = materiales.map(m => m.id);
-    db.query('SELECT ID_Material, Nombre FROM material WHERE ID_Material IN (?)', [ids], (err, mats) => {
-        const nombres = {};
-        (mats || []).forEach(m => { nombres[m.ID_Material] = m.Nombre; });
-        const pedido = {
-            id: idPedido,
-            fecha: datos.fecha_recogida ? String(datos.fecha_recogida) : '',
-            horaRecogida: datos.hora_recogida || '',
-            horaDevolucion: datos.hora_devolucion || '',
-            proposito: datos.proposito || '',
-            materiales: materiales.map(m => ({ nombre: nombres[m.id] || m.n || `Material ${m.id}`, cantidad: m.cantidad })),
-        };
-        db.query('SELECT Nombre, Email FROM alumno WHERE Registro_Alu IN (?)', [matriculas], (err, alumnos) => {
-            if (err) return console.error('No se pudieron obtener los correos del equipo:', err.message);
-            alumnos.forEach(a => a.Email && correoPedido(a.Email, a.Nombre, pedido));
-        });
-    });
+app.use(helmet());                                   // encabezados HTTP seguros
+if (config.corsOrigenes.length > 0) {                // por defecto ningún otro sitio puede llamar a la API
+    app.use(cors({ origin: config.corsOrigenes, credentials: true }));
 }
+app.use(express.json({ limit: '100kb' }));           // cuerpos pequeños: evita saturar el servidor
+app.use(cookieParser());
+app.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+app.use(seg.filtroIP);                               // IP bloqueadas por actividad sospechosa
+app.use(seg.identificar);                            // lee la cookie de sesión → req.usuario
+app.use(seg.limites.general);                        // rate limiting general
+
+const soloAlumno = seg.requiereRol('alumno');
+const soloAdmin = seg.requiereRol('admin');
+
+// TODO lo que empiece con /api/admin exige sesión de administrador, sin excepción.
+// Así una ruta nueva de administrador queda protegida aunque se olvide ponerle el candado.
+app.use('/api/admin', soloAdmin);
+
+const BCRYPT_RONDAS = 12;
+// Se compara contra este hash cuando el correo no existe, para que la respuesta tarde
+// lo mismo exista o no la cuenta (no se puede "adivinar" quién está registrado).
+const HASH_SENUELO = bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), BCRYPT_RONDAS);
+
+const sinPassword = ({ Password, ...resto }) => resto;
+
+// =======================================================
+// SESIÓN: LOGIN, LOGOUT, REGISTRO
+// =======================================================
+app.post('/api/login', seg.limites.login, async (req, res) => {
+    const { email, password } = leer(esquemas.login, req.body);
+
+    if (seg.cuentaBloqueada(email)) {
+        registrar('LOGIN_CUENTA_BLOQUEADA', { req, nivel: 'alerta', usuario: email });
+        throw new ErrorHttp(429, 'Cuenta bloqueada temporalmente por demasiados intentos. Intenta en 15 minutos o usa "¿Olvidaste tu contraseña?".');
+    }
+
+    let rol = 'admin';
+    let [cuenta] = await consultar('SELECT * FROM administrador WHERE Email = ? LIMIT 1', [email]);
+    if (!cuenta) {
+        rol = 'alumno';
+        [cuenta] = await consultar('SELECT * FROM alumno WHERE Email = ? LIMIT 1', [email]);
+    }
+
+    const coincide = await bcrypt.compare(password, cuenta?.Password || HASH_SENUELO);
+    if (!cuenta || !cuenta.Password || !coincide) {
+        const bloqueada = seg.anotarFallo(email);
+        registrar(bloqueada ? 'CUENTA_BLOQUEADA' : 'LOGIN_FALLIDO', {
+            req, nivel: bloqueada ? 'critico' : 'alerta', usuario: email,
+            detalle: bloqueada ? '5 contraseñas incorrectas seguidas' : '',
+        });
+        seg.sospecha(req);
+        // Mismo mensaje si el correo no existe o si la contraseña está mal.
+        throw new ErrorHttp(401, 'Correo o contraseña incorrectos. Si no recuerdas tu contraseña usa "¿Olvidaste tu contraseña?".');
+    }
+
+    seg.limpiarIntentos(email);
+    const sub = rol === 'admin' ? cuenta.Email : cuenta.Registro_Alu;
+    seg.abrirSesion(req, res, { sub, rol, nombre: cuenta.Nombre, email: cuenta.Email });
+    registrar('LOGIN_OK', { req, usuario: sub, rol });
+
+    const user = sinPassword(cuenta); // el hash de la contraseña nunca sale del servidor
+    if (rol === 'alumno') {
+        const actual = cicloActual();
+        user.Ciclo_Actual = actual;
+        user.Requiere_Actualizar = cuenta.Ciclo_Semestre !== actual;
+        user.Semestre_Sugerido = semestreSugerido(cuenta.FK_Semestre, cuenta.Ciclo_Semestre, actual);
+    }
+    res.json({ status: 'success', role: rol, user });
+});
+
+app.post('/api/logout', (req, res) => {
+    if (req.usuario) registrar('LOGOUT', { req });
+    seg.cerrarSesion(req, res);
+    res.json({ status: 'success' });
+});
+
+app.post('/api/registro', seg.limites.registro, async (req, res) => {
+    const d = leer(esquemas.registro, req.body);
+    const hash = await bcrypt.hash(d.password, BCRYPT_RONDAS);
+
+    const [carrera] = await consultar('SELECT ID_Carrera FROM carrera WHERE Nombre_Carrera = ? LIMIT 1', [d.carrera_texto]);
+    if (!carrera) throw new ErrorHttp(400, 'La carrera seleccionada no es válida.');
+
+    try {
+        await consultar(
+            `INSERT INTO alumno (Nombre, Registro_Alu, Email, Password, Telefono, FK_Carrera, FK_Semestre, Ciclo_Semestre)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [d.nombre, d.registro_alu, d.email, hash, d.telefono, carrera.ID_Carrera, d.semestre, cicloActual()],
+        );
+    } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') throw new ErrorHttp(400, 'Este alumno o correo ya está registrado.');
+        throw err;
+    }
+    registrar('REGISTRO', { req, usuario: d.registro_alu, rol: 'alumno' });
+    res.status(201).json({ status: 'success', message: 'Cuenta creada con éxito' });
+    correoBienvenida(d.email, d.nombre);
+});
 
 // =======================================================
 // RECUPERAR CONTRASEÑA (código de 6 dígitos por correo)
@@ -226,274 +130,110 @@ function notificarPedido(idPedido, matriculas, materiales, datos) {
 // Los códigos viven en memoria: vencen en 15 min y se pierden si el servidor se reinicia.
 const codigosRecuperacion = new Map(); // email -> { hash, expira, intentos, tabla }
 const QUINCE_MIN = 15 * 60 * 1000;
-const hashCodigo = (codigo) => crypto.createHash('sha256').update(codigo).digest('hex');
+const hashCodigo = (codigo) => crypto.createHash('sha256').update(codigo).digest();
 
-function buscarCuenta(email, cb) {
-    db.query('SELECT Nombre FROM administrador WHERE Email = ?', [email], (err, admins) => {
-        if (err) return cb(err);
-        if (admins.length > 0) return cb(null, { tabla: 'administrador', nombre: admins[0].Nombre });
-        db.query('SELECT Nombre FROM alumno WHERE Email = ?', [email], (err, alumnos) => {
-            if (err) return cb(err);
-            if (alumnos.length > 0) return cb(null, { tabla: 'alumno', nombre: alumnos[0].Nombre });
-            cb(null, null);
-        });
-    });
+async function buscarCuenta(email) {
+    const [admin] = await consultar('SELECT Nombre FROM administrador WHERE Email = ? LIMIT 1', [email]);
+    if (admin) return { tabla: 'administrador', nombre: admin.Nombre };
+    const [alumno] = await consultar('SELECT Nombre FROM alumno WHERE Email = ? LIMIT 1', [email]);
+    return alumno ? { tabla: 'alumno', nombre: alumno.Nombre } : null;
 }
 
-app.post('/api/recuperar/solicitar', (req, res) => {
-    const email = String(req.body.email || '').trim();
-    if (!email) return res.status(400).json({ status: "error", message: "Escribe tu correo." });
+app.post('/api/recuperar/solicitar', seg.limites.recuperar, async (req, res) => {
+    const { email } = leer(esquemas.recuperarSolicitar, req.body);
+    // La respuesta es la misma exista o no la cuenta: no revela quién está registrado.
+    const respuesta = { status: 'success', message: 'Si el correo está registrado, te enviamos un código de 6 dígitos.' };
 
-    const previo = codigosRecuperacion.get(email.toLowerCase());
+    const previo = codigosRecuperacion.get(email);
     if (previo && previo.expira - QUINCE_MIN + 60 * 1000 > Date.now()) {
-        return res.status(429).json({ status: "error", message: "Ya te enviamos un código. Espera un minuto para pedir otro." });
+        throw new ErrorHttp(429, 'Ya se solicitó un código hace un momento. Espera un minuto para pedir otro.');
     }
 
-    buscarCuenta(email, async (err, cuenta) => {
-        if (err) return res.status(500).json({ status: "error", message: "Error al buscar la cuenta." });
-        if (!cuenta) return res.status(404).json({ status: "error", message: "No hay ninguna cuenta con ese correo." });
+    const cuenta = await buscarCuenta(email);
+    if (!cuenta) {
+        registrar('RECUPERAR_CORREO_INEXISTENTE', { req, nivel: 'alerta', usuario: email });
+        seg.sospecha(req);
+        return res.json(respuesta);
+    }
 
-        const codigo = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
-        codigosRecuperacion.set(email.toLowerCase(), {
-            hash: hashCodigo(codigo), expira: Date.now() + QUINCE_MIN, intentos: 0, tabla: cuenta.tabla,
-        });
+    const codigo = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    codigosRecuperacion.set(email, { hash: hashCodigo(codigo), expira: Date.now() + QUINCE_MIN, intentos: 0, tabla: cuenta.tabla });
+    registrar('RECUPERAR_SOLICITADO', { req, usuario: email });
 
-        const enviado = await correoRecuperacion(email, cuenta.nombre || '', codigo);
-        if (!enviado) {
-            codigosRecuperacion.delete(email.toLowerCase());
-            return res.status(500).json({ status: "error", message: "No se pudo enviar el correo. Intenta más tarde." });
-        }
-        res.json({ status: "success", message: "Te enviamos un código de 6 dígitos a tu correo." });
-    });
+    const enviado = await correoRecuperacion(email, cuenta.nombre || '', codigo);
+    if (!enviado) {
+        codigosRecuperacion.delete(email);
+        throw new ErrorHttp(503, 'No se pudo enviar el correo. Intenta más tarde.');
+    }
+    res.json(respuesta);
 });
 
-app.post('/api/recuperar/confirmar', (req, res) => {
-    const email = String(req.body.email || '').trim();
-    const codigo = String(req.body.codigo || '').trim();
-    const nueva = String(req.body.password || '');
-    const registro = codigosRecuperacion.get(email.toLowerCase());
+app.post('/api/recuperar/confirmar', seg.limites.recuperar, async (req, res) => {
+    const { email, codigo, password } = leer(esquemas.recuperarConfirmar, req.body);
+    const registro = codigosRecuperacion.get(email);
 
     if (!registro || registro.expira < Date.now()) {
-        codigosRecuperacion.delete(email.toLowerCase());
-        return res.status(400).json({ status: "error", message: "El código venció o no existe. Pide uno nuevo." });
+        codigosRecuperacion.delete(email);
+        throw new ErrorHttp(400, 'El código venció o no existe. Pide uno nuevo.');
     }
     if (registro.intentos >= 5) {
-        codigosRecuperacion.delete(email.toLowerCase());
-        return res.status(429).json({ status: "error", message: "Demasiados intentos. Pide un código nuevo." });
+        codigosRecuperacion.delete(email);
+        registrar('RECUPERAR_DEMASIADOS_INTENTOS', { req, nivel: 'critico', usuario: email });
+        throw new ErrorHttp(429, 'Demasiados intentos. Pide un código nuevo.');
     }
-    if (hashCodigo(codigo) !== registro.hash) {
+    if (!crypto.timingSafeEqual(hashCodigo(codigo), registro.hash)) {
         registro.intentos++;
-        return res.status(400).json({ status: "error", message: "El código es incorrecto." });
+        registrar('RECUPERAR_CODIGO_INCORRECTO', { req, nivel: 'alerta', usuario: email });
+        seg.sospecha(req);
+        throw new ErrorHttp(400, 'El código es incorrecto.');
     }
-    if (nueva.length < 6) {
-        return res.status(400).json({ status: "error", message: "La contraseña debe tener al menos 6 caracteres." });
+
+    const hash = await bcrypt.hash(password, BCRYPT_RONDAS);
+    // registro.tabla solo puede ser 'administrador' o 'alumno' (lo fija buscarCuenta)
+    await consultar(`UPDATE ${registro.tabla} SET Password = ? WHERE Email = ?`, [hash, email]);
+    codigosRecuperacion.delete(email);
+    seg.limpiarIntentos(email);
+    registrar('PASSWORD_CAMBIADA', { req, usuario: email });
+    res.json({ status: 'success', message: '¡Listo! Ya puedes iniciar sesión con tu nueva contraseña.' });
+});
+
+// =======================================================
+// PERFIL DEL ALUMNO: ACTUALIZACIÓN AL INICIO DE CADA CICLO
+// =======================================================
+// Una sola vez por ciclo (cada 6 meses) el alumno confirma su semestre y su teléfono.
+app.put('/api/mi-perfil/ciclo', soloAlumno, async (req, res) => {
+    const { semestre, telefono } = leer(esquemas.actualizarCiclo, req.body);
+    const actual = cicloActual();
+    const r = await consultar(
+        `UPDATE alumno SET FK_Semestre = ?, Telefono = COALESCE(?, Telefono), Ciclo_Semestre = ?
+         WHERE Registro_Alu = ? AND (Ciclo_Semestre IS NULL OR Ciclo_Semestre <> ?)`,
+        [semestre, telefono || null, actual, req.usuario.sub, actual],
+    );
+    if (r.affectedRows === 0) {
+        throw new ErrorHttp(409, 'Ya confirmaste tus datos en este ciclo. Si hay un error, acude con el administrador del almacén.');
     }
-
-    bcrypt.hash(nueva, 10, (err, hash) => {
-        if (err) return res.status(500).json({ status: "error", message: "Error al encriptar." });
-        // registro.tabla solo puede ser 'administrador' o 'alumno' (lo fija buscarCuenta)
-        db.query(`UPDATE ${registro.tabla} SET Password = ? WHERE Email = ?`, [hash, email], (err) => {
-            if (err) return res.status(500).json({ status: "error", message: "No se pudo guardar la contraseña." });
-            codigosRecuperacion.delete(email.toLowerCase());
-            res.json({ status: "success", message: "¡Listo! Ya puedes iniciar sesión con tu nueva contraseña." });
-        });
+    registrar('PERFIL_CICLO_ACTUALIZADO', { req, detalle: `Semestre ${semestre}, ciclo ${actual}` });
+    const [alumno] = await consultar('SELECT * FROM alumno WHERE Registro_Alu = ?', [req.usuario.sub]);
+    res.json({
+        status: 'success',
+        message: 'Datos actualizados. ¡Buen inicio de ciclo!',
+        user: { ...sinPassword(alumno), Ciclo_Actual: actual, Requiere_Actualizar: false, Semestre_Sugerido: semestre },
     });
 });
 
-// --- VENTANILLA 5: OBTENER HISTORIAL DE PEDIDOS ---
-app.get('/api/mis-pedidos/:matricula', (req, res) => {
-    const matricula = req.params.matricula;
-
-    const queryLimpieza = `
-        UPDATE pedido 
-        SET FK_Estado = 7 
-        WHERE FK_Estado = 1 AND Fecha_Solicitud < (NOW() - INTERVAL 1 DAY)
-    `;
-
-    db.query(queryLimpieza, (err) => {
-        if (err) console.error("Error silencioso en la limpieza automática:", err);
-
-        const queryHistorial = `
-            SELECT 
-                p.ID_Pedido, 
-                p.Fecha_Solicitud, 
-                p.Fecha_Recogida, 
-                p.Proposito, 
-                p.Motivo_Rechazo,
-                est.Nombre_de_estado AS Estado, 
-                ep.Rol,
-                GROUP_CONCAT(CONCAT(dp.Cantidad, 'x ', m.Nombre) SEPARATOR '|') AS ListaMateriales
-            FROM pedido p
-            JOIN equipo_pedido ep ON p.ID_Pedido = ep.FK_Pedido
-            JOIN estado_pedido est ON p.FK_Estado = est.No_estado
-            LEFT JOIN detalle_pedido dp ON p.ID_Pedido = dp.FK_Pedido
-            LEFT JOIN material m ON dp.FK_Material = m.ID_Material
-            WHERE ep.FK_Matricula = ? AND est.No_estado != 7 
-            GROUP BY p.ID_Pedido, p.Fecha_Solicitud, p.Fecha_Recogida, p.Proposito, p.Motivo_Rechazo, est.Nombre_de_estado, ep.Rol
-            ORDER BY p.Fecha_Solicitud DESC;
-        `;
-
-        db.query(queryHistorial, [matricula], (err, resultados) => {
-            if (err) return res.status(500).json({ status: "error", message: "Error al buscar los pedidos." });
-            res.status(200).json({ status: "success", pedidos: resultados });
-        });
-    });
-});
-
-// --- VENTANILLA 6: OBTENER PEDIDOS PENDIENTES PARA EL ADMIN ---
-app.get('/api/admin/pedidos', (req, res) => {
-    const queryPedidos = `
-        SELECT ID_Pedido, Fecha_Recogida, Proposito 
-        FROM pedido 
-        WHERE FK_Estado = 1 
-        ORDER BY Fecha_Recogida ASC;
-    `;
-
-    db.query(queryPedidos, (err, pedidosDb) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (pedidosDb.length === 0) return res.status(200).json([]);
-
-        const idsPedidos = pedidosDb.map(p => p.ID_Pedido);
-
-        const queryEquipo = `
-            SELECT ep.FK_Pedido, ep.FK_Matricula, a.Nombre, ep.Rol 
-            FROM equipo_pedido ep 
-            JOIN alumno a ON ep.FK_Matricula = a.Registro_Alu 
-            WHERE ep.FK_Pedido IN (?)
-        `;
-
-        const queryMateriales = `
-            SELECT dp.FK_Pedido, m.Nombre, dp.Cantidad 
-            FROM detalle_pedido dp 
-            JOIN material m ON dp.FK_Material = m.ID_Material 
-            WHERE dp.FK_Pedido IN (?)
-        `;
-
-        db.query(queryEquipo, [idsPedidos], (err, equipoDb) => {
-            if (err) return res.status(500).json({ error: err.message });
-
-            db.query(queryMateriales, [idsPedidos], (err, materialesDb) => {
-                if (err) return res.status(500).json({ error: err.message });
-
-                const pedidosArmados = pedidosDb.map(pedido => {
-                    const integrantes = equipoDb.filter(e => e.FK_Pedido === pedido.ID_Pedido);
-                    const lider = integrantes.find(e => e.Rol === 'Líder') || integrantes[0];
-                    const colaboradores = integrantes.filter(e => e.Rol !== 'Líder');
-                    const materiales = materialesDb.filter(m => m.FK_Pedido === pedido.ID_Pedido);
-
-                    const fechaObj = new Date(pedido.Fecha_Recogida);
-                    const opcionesFecha = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-                    let fechaBonita = fechaObj.toLocaleDateString('es-ES', opcionesFecha);
-                    fechaBonita = fechaBonita.charAt(0).toUpperCase() + fechaBonita.slice(1);
-
-                    return {
-                        id: pedido.ID_Pedido,
-                        fecha_recogida: fechaBonita,
-                        esEquipo: colaboradores.length > 0,
-                        solicitante: { 
-                            matricula: lider ? lider.FK_Matricula : 'N/A', 
-                            nombre: lider ? lider.Nombre : 'Desconocido' 
-                        },
-                        equipo: colaboradores.map(c => ({ matricula: c.FK_Matricula, nombre: c.Nombre })),
-                        proposito: pedido.Proposito,
-                        materiales: materiales.map(m => ({ nombre: m.Nombre, cantidad: m.Cantidad }))
-                    };
-                });
-
-                res.status(200).json(pedidosArmados);
-            });
-        });
-    });
-});
-
-// --- VENTANILLA 7: ADMIN - APROBAR PEDIDO ---
-app.put('/api/admin/pedidos/:id/aprobar', (req, res) => {
-    const idPedido = req.params.id;
-    const { id_casillero } = req.body; 
-
-    if (!id_casillero) return res.status(400).json({ status: "error", message: "Selecciona un casillero." });
-
-    db.beginTransaction((err) => {
-        if (err) return res.status(500).json({ status: "error", message: "Error al iniciar el motor de base de datos" });
-
-        // El casillero elegido debe existir y estar libre: un casillero = un pedido.
-        db.query("SELECT Fk_Estado FROM casillero WHERE ID_Casillero = ? FOR UPDATE", [id_casillero], (err, celdas) => {
-            if (err) return db.rollback(() => res.status(500).json({ status: "error", message: "Error al revisar el casillero." }));
-            if (celdas.length === 0) return db.rollback(() => res.status(404).json({ status: "error", message: "Ese casillero no existe." }));
-            if (celdas[0].Fk_Estado !== 1) return db.rollback(() => res.status(409).json({ status: "error", message: "Ese casillero ya no está libre. Elige otro." }));
-
-        db.query("SELECT FK_Estado FROM pedido WHERE ID_Pedido = ? FOR UPDATE", [idPedido], (err, pedidos) => {
-            if (err) return db.rollback(() => res.status(500).json({ status: "error", message: "Error al revisar el pedido." }));
-            if (pedidos.length === 0) return db.rollback(() => res.status(404).json({ status: "error", message: "El pedido no existe." }));
-            if (pedidos[0].FK_Estado !== 1) return db.rollback(() => res.status(409).json({ status: "error", message: "Este pedido ya fue procesado." }));
-
-        const queryUpdatePedido = "UPDATE pedido SET FK_Estado = 2, FK_Casillero = ? WHERE ID_Pedido = ?";
-        
-        db.query(queryUpdatePedido, [id_casillero, idPedido], (err) => {
-            if (err) return db.rollback(() => res.status(500).json({ status: "error", message: "Error al actualizar la cabecera." }));
-
-        const queryOcuparCasillero = "UPDATE casillero SET FK_Estado = 2 WHERE ID_Casillero = ?";
-            
-        db.query(queryOcuparCasillero, [id_casillero], (err) => {
-            if (err) return db.rollback(() => res.status(500).json({ status: "error", message: "Error al bloquear el casillero." }));
-
-                const queryDetalles = "SELECT FK_Material, Cantidad FROM detalle_pedido WHERE FK_Pedido = ?";
-                
-                db.query(queryDetalles, [idPedido], (err, detalles) => {
-                    if (err) return db.rollback(() => res.status(500).json({ status: "error", message: "Error al leer lista de materiales." }));
-                    if (detalles.length === 0) return db.commit(() => { res.status(200).json({ status: "success", message: "Pedido procesado." }); notificarAprobacion(idPedido); });
-
-                    let restasCompletadas = 0;
-                    detalles.forEach((item) => {
-                        const queryDescuento = "UPDATE material SET Cantidad = Cantidad - ? WHERE ID_Material = ?";
-                        
-                        db.query(queryDescuento, [item.Cantidad, item.FK_Material], (err) => {
-                            if (err) return db.rollback(() => res.status(500).json({ status: "error", message: `Error en stock.` }));
-                            
-                            restasCompletadas++;
-                            
-                            if (restasCompletadas === detalles.length) {
-                                db.commit((errCommit) => {
-                                    if (errCommit) return db.rollback(() => res.status(500).json({ status: "error", message: "Error al confirmar." }));
-                                    res.status(200).json({ status: "success", message: "¡Stock descontado y casillero ocupado!" });
-                                    notificarAprobacion(idPedido);
-                                });
-                            }
-                        });
-                    });
-                });
-            });
-        });
-        });
-        });
-    });
-});
-
-// --- VENTANILLA 7.5: ADMIN - RECHAZAR PEDIDO ---
-app.put('/api/admin/pedidos/:id/rechazar', (req, res) => {
-    const idPedido = req.params.id;
-    const motivo = String(req.body.motivo || '').trim().slice(0, 500);
-    if (!motivo) return res.status(400).json({ status: "error", message: "Escribe el motivo del rechazo." });
-
-    // Solo se rechazan pedidos pendientes (estado 1). Se guarda el motivo para el alumno.
-    const queryRechazar = "UPDATE pedido SET FK_Estado = 4, Motivo_Rechazo = ? WHERE ID_Pedido = ? AND FK_Estado = 1";
-    db.query(queryRechazar, [motivo, idPedido], (err, resultado) => {
-        if (err) {
-            console.error("Error al rechazar pedido:", err);
-            return res.status(500).json({ status: "error", message: "Error al actualizar el estado a rechazado." });
-        }
-        if (resultado.affectedRows === 0) return res.status(409).json({ status: "error", message: "Este pedido ya fue procesado o no existe." });
-        res.status(200).json({ status: "success", message: "Pedido rechazado y removido de la lista." });
-        notificarRechazo(idPedido);
-    });
+// =======================================================
+// CATÁLOGO (requiere sesión; ninguna tabla es pública)
+// =======================================================
+app.get('/api/materiales', seg.requiereSesion, async (req, res) => {
+    res.json(await consultar('SELECT * FROM material'));
 });
 
 // --- MATERIALES MÁS SOLICITADOS (para la página de inicio) ---
-app.get('/api/materiales-populares', (req, res) => {
-    const limite = Math.min(Number(req.query.limite) || 4, 12);
+app.get('/api/materiales-populares', seg.requiereSesion, async (req, res) => {
+    const limite = Math.min(Math.max(parseInt(req.query.limite, 10) || 4, 1), 12);
     // Cuenta en cuántos pedidos aparece cada material (sin contar rechazados, cancelados ni expirados).
     // Si hay pocos pedidos, completa la lista con otros materiales del catálogo.
-    const query = `
+    res.json(await consultar(`
         SELECT m.ID_Material, m.Nombre, m.Cantidad, m.FK_No_Categoria,
                COUNT(DISTINCT p.ID_Pedido) AS Veces_Solicitado,
                COALESCE(SUM(CASE WHEN p.ID_Pedido IS NOT NULL THEN dp.Cantidad END), 0) AS Unidades_Solicitadas
@@ -502,16 +242,126 @@ app.get('/api/materiales-populares', (req, res) => {
         LEFT JOIN pedido p ON p.ID_Pedido = dp.FK_Pedido AND p.FK_Estado NOT IN (4, 6, 7)
         GROUP BY m.ID_Material, m.Nombre, m.Cantidad, m.FK_No_Categoria
         ORDER BY Veces_Solicitado DESC, Unidades_Solicitadas DESC, m.Nombre ASC
-        LIMIT ?`;
-    db.query(query, [limite], (err, resultado) => {
-        if (err) return res.status(500).json({ status: "error", message: "Error al cargar los más solicitados." });
-        res.json(resultado);
-    });
+        LIMIT ?`, [limite]));
 });
 
-// --- DETALLE REAL DE UN PEDIDO (página del pase / QR del alumno) ---
-function obtenerDetallePedido(idPedido, cb) {
-    const query = `
+app.get('/api/materiales/:id', seg.requiereSesion, async (req, res) => {
+    const id = leer(esquemas.idNumerico, req.params.id);
+    const [material] = await consultar('SELECT * FROM material WHERE ID_Material = ?', [id]);
+    if (!material) throw new ErrorHttp(404, 'Material no encontrado.');
+    res.json(material);
+});
+
+app.get('/api/casilleros', seg.requiereSesion, async (req, res) => {
+    res.json(await consultar('SELECT * FROM casillero'));
+});
+
+// --- BUSCADOR DE COMPAÑEROS (solo alumnos con sesión; no entrega correos ni teléfonos) ---
+app.get('/api/alumnos/buscar', soloAlumno, async (req, res) => {
+    if (String(req.query.q || '').trim().length < 2) return res.json([]);
+    const q = leer(esquemas.busqueda, req.query.q);
+    // Se escapan % y _ para que no funcionen como comodines y listen a todos los alumnos.
+    const patron = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+    res.json(await consultar(
+        `SELECT Registro_Alu AS registro, Nombre AS nombre FROM alumno
+         WHERE Nombre LIKE ? OR Registro_Alu LIKE ? LIMIT 10`, [patron, patron]));
+});
+
+// =======================================================
+// PEDIDOS DEL ALUMNO
+// =======================================================
+// Regla de acceso por fila: un alumno solo puede ver y usar los pedidos en los que
+// es integrante. La matrícula SIEMPRE se toma de la sesión, nunca de lo que mande el navegador.
+const nuevoFolio = () => `PED-${new Date().getFullYear()}-${crypto.randomInt(100000, 1000000)}`;
+
+app.post('/api/pedidos', soloAlumno, seg.limites.pedidos, async (req, res) => {
+    const d = leer(esquemas.pedido, req.body);
+    const solicitante = req.usuario.sub;
+    const matriculas = [...new Set([solicitante, ...d.integrantes.map((i) => i.matricula)])];
+
+    // Si un material viene repetido, se suman sus cantidades.
+    const cantidades = new Map();
+    d.materiales.forEach((m) => cantidades.set(m.id, (cantidades.get(m.id) || 0) + m.cantidad));
+    const materiales = [...cantidades].map(([id, cantidad]) => ({ id, cantidad }));
+
+    const idPedido = await transaccion(async (q) => {
+        const alumnos = await q('SELECT Registro_Alu FROM alumno WHERE Registro_Alu IN (?)', [matriculas]);
+        if (alumnos.length !== matriculas.length) throw new ErrorHttp(400, 'Uno de los integrantes no está registrado en SafeStock.');
+
+        const duplicados = await q(`
+            SELECT u.Nombre FROM equipo_pedido ep
+            JOIN pedido p ON ep.FK_Pedido = p.ID_Pedido
+            JOIN alumno u ON ep.FK_Matricula = u.Registro_Alu
+            WHERE p.Fecha_Recogida = ? AND ep.FK_Matricula IN (?) AND p.FK_Estado IN (1, 2, 3)
+            LIMIT 1`, [d.fecha_recogida, matriculas]);
+        if (duplicados.length > 0) {
+            throw new ErrorHttp(400, `${duplicados[0].Nombre} ya tiene una solicitud de material registrada para esta misma fecha.`);
+        }
+
+        const existentes = await q('SELECT ID_Material, Nombre, Cantidad FROM material WHERE ID_Material IN (?)', [materiales.map((m) => m.id)]);
+        for (const m of materiales) {
+            const enAlmacen = existentes.find((e) => Number(e.ID_Material) === m.id);
+            if (!enAlmacen) throw new ErrorHttp(400, 'Uno de los materiales ya no existe en el inventario.');
+            if (m.cantidad > enAlmacen.Cantidad) throw new ErrorHttp(400, `Solo hay ${enAlmacen.Cantidad} unidades disponibles de ${enAlmacen.Nombre}.`);
+            m.nombre = enAlmacen.Nombre;
+        }
+
+        // El folio lo genera el servidor (antes lo inventaba el navegador).
+        let folio;
+        for (let intento = 0; ; intento++) {
+            folio = nuevoFolio();
+            try {
+                await q(`INSERT INTO pedido (ID_Pedido, Fecha_Solicitud, Fecha_Recogida, Proposito, FK_Solicitante, FK_Estado, Hora_Recogida, Hora_Devolucion)
+                         VALUES (?, NOW(), ?, ?, ?, 1, ?, ?)`,
+                    [folio, d.fecha_recogida, d.proposito, solicitante, d.hora_recogida, d.hora_devolucion]);
+                break;
+            } catch (err) {
+                if (err.code !== 'ER_DUP_ENTRY' || intento >= 4) throw err;
+            }
+        }
+        await q('INSERT INTO equipo_pedido (FK_Pedido, FK_Matricula, Rol) VALUES ?',
+            [matriculas.map((m) => [folio, m, m === solicitante ? 'Líder' : 'Colaborador'])]);
+        await q('INSERT INTO detalle_pedido (FK_Pedido, FK_Material, Cantidad) VALUES ?',
+            [materiales.map((m) => [folio, m.id, m.cantidad])]);
+        return folio;
+    });
+
+    registrar('PEDIDO_CREADO', { req, detalle: idPedido });
+    res.json({ status: 'success', message: 'Pedido de equipo procesado con éxito.', id_pedido: idPedido });
+
+    // Correo de confirmación a cada integrante (no bloquea la respuesta).
+    const pedido = {
+        id: idPedido, fecha: d.fecha_recogida, horaRecogida: d.hora_recogida, horaDevolucion: d.hora_devolucion,
+        proposito: d.proposito, materiales: materiales.map((m) => ({ nombre: m.nombre, cantidad: m.cantidad })),
+    };
+    consultar('SELECT Nombre, Email FROM alumno WHERE Registro_Alu IN (?)', [matriculas])
+        .then((alumnos) => alumnos.forEach((a) => a.Email && correoPedido(a.Email, a.Nombre, pedido)))
+        .catch((err) => console.error('No se pudieron obtener los correos del equipo:', err.code || err.message));
+});
+
+app.get('/api/mis-pedidos', soloAlumno, async (req, res) => {
+    // Los pedidos que llevan más de un día sin revisarse pasan a "Expirado".
+    await consultar('UPDATE pedido SET FK_Estado = 7 WHERE FK_Estado = 1 AND Fecha_Solicitud < (NOW() - INTERVAL 1 DAY)')
+        .catch((err) => console.error('Error en la limpieza automática:', err.code || err.message));
+
+    const pedidos = await consultar(`
+        SELECT p.ID_Pedido, p.Fecha_Solicitud, p.Fecha_Recogida, p.Proposito, p.Motivo_Rechazo,
+               est.Nombre_de_estado AS Estado, ep.Rol,
+               GROUP_CONCAT(CONCAT(dp.Cantidad, 'x ', m.Nombre) SEPARATOR '|') AS ListaMateriales
+        FROM pedido p
+        JOIN equipo_pedido ep ON p.ID_Pedido = ep.FK_Pedido
+        JOIN estado_pedido est ON p.FK_Estado = est.No_estado
+        LEFT JOIN detalle_pedido dp ON p.ID_Pedido = dp.FK_Pedido
+        LEFT JOIN material m ON dp.FK_Material = m.ID_Material
+        WHERE ep.FK_Matricula = ? AND est.No_estado != 7
+        GROUP BY p.ID_Pedido, p.Fecha_Solicitud, p.Fecha_Recogida, p.Proposito, p.Motivo_Rechazo, est.Nombre_de_estado, ep.Rol
+        ORDER BY p.Fecha_Solicitud DESC`, [req.usuario.sub]);
+    res.json({ status: 'success', pedidos });
+});
+
+// Detalle completo de un pedido (uso interno: incluye correos de los integrantes).
+async function obtenerDetallePedido(idPedido) {
+    const [pedido] = await consultar(`
         SELECT p.ID_Pedido, p.Fecha_Solicitud, p.Fecha_Recogida, p.Hora_Recogida, p.Hora_Devolucion,
                p.Proposito, p.FK_Estado, est.Nombre_de_estado AS Estado, p.FK_Casillero, p.Motivo_Rechazo,
                c.Identificador AS Casillero, a.Nombre AS Solicitante_Nombre, a.Apellido AS Solicitante_Apellido,
@@ -520,343 +370,393 @@ function obtenerDetallePedido(idPedido, cb) {
         JOIN estado_pedido est ON p.FK_Estado = est.No_estado
         LEFT JOIN casillero c ON p.FK_Casillero = c.ID_Casillero
         LEFT JOIN alumno a ON p.FK_Solicitante = a.Registro_Alu
-        WHERE p.ID_Pedido = ?`;
-    db.query(query, [idPedido], (err, filas) => {
-        if (err) return cb(err);
-        if (filas.length === 0) return cb(null, null);
-        const pedido = filas[0];
-        db.query(`SELECT m.ID_Material, m.Nombre, dp.Cantidad FROM detalle_pedido dp
-                  JOIN material m ON m.ID_Material = dp.FK_Material WHERE dp.FK_Pedido = ?`, [idPedido], (err, materiales) => {
-            if (err) return cb(err);
-            db.query(`SELECT a.Nombre, a.Email, ep.FK_Matricula, ep.Rol FROM equipo_pedido ep
-                      JOIN alumno a ON a.Registro_Alu = ep.FK_Matricula WHERE ep.FK_Pedido = ?`, [idPedido], (err, equipo) => {
-                if (err) return cb(err);
-                cb(null, { ...pedido, materiales, equipo });
-            });
-        });
-    });
+        WHERE p.ID_Pedido = ?`, [idPedido]);
+    if (!pedido) return null;
+    const [materiales, equipo] = await Promise.all([
+        consultar(`SELECT m.ID_Material, m.Nombre, dp.Cantidad FROM detalle_pedido dp
+                   JOIN material m ON m.ID_Material = dp.FK_Material WHERE dp.FK_Pedido = ?`, [idPedido]),
+        consultar(`SELECT a.Nombre, a.Email, ep.FK_Matricula, ep.Rol FROM equipo_pedido ep
+                   JOIN alumno a ON a.Registro_Alu = ep.FK_Matricula WHERE ep.FK_Pedido = ?`, [idPedido]),
+    ]);
+    return { ...pedido, materiales, equipo };
 }
 
-app.get('/api/pedidos/:id', (req, res) => {
-    obtenerDetallePedido(req.params.id, (err, pedido) => {
-        if (err) return res.status(500).json({ status: "error", message: "Error al cargar el pedido." });
-        if (!pedido) return res.status(404).json({ status: "error", message: "Pedido no encontrado." });
-        // No exponemos los correos de los integrantes
-        pedido.equipo = pedido.equipo.map(({ Email, ...resto }) => resto);
-        delete pedido.Solicitante_Email;
-        res.json(pedido);
-    });
+// Carga el pedido y comprueba que quien lo pide sea integrante (o administrador).
+// A un extraño se le responde "no encontrado": así no puede saber qué folios existen.
+async function pedidoAutorizado(req, { soloIntegrante = false } = {}) {
+    const id = leer(esquemas.idPedido, req.params.id);
+    const pedido = await obtenerDetallePedido(id);
+    const integrante = pedido?.equipo.find((i) => String(i.FK_Matricula) === req.usuario.sub && req.usuario.rol === 'alumno');
+    const permitido = integrante || (!soloIntegrante && req.usuario.rol === 'admin');
+    if (pedido && !permitido) {
+        registrar('PEDIDO_AJENO', { req, nivel: 'alerta', detalle: `Intentó abrir el pedido ${id}` });
+        seg.sospecha(req, 3);
+    }
+    if (!pedido || !permitido) throw new ErrorHttp(404, 'Pedido no encontrado.');
+    return { pedido, integrante };
+}
+
+app.get('/api/pedidos/:id', seg.requiereSesion, async (req, res) => {
+    const { pedido } = await pedidoAutorizado(req);
+    // No exponemos los correos de los integrantes
+    pedido.equipo = pedido.equipo.map(({ Email, ...resto }) => resto);
+    delete pedido.Solicitante_Email;
+    res.json(pedido);
 });
 
 // QR cifrado del pedido. Solo existe si el pedido está aprobado y tiene casillero,
 // y solo se entrega a un integrante del pedido.
-app.get('/api/pedidos/:id/qr', (req, res) => {
-    const matricula = String(req.query.matricula || '');
-    obtenerDetallePedido(req.params.id, async (err, pedido) => {
-        if (err) return res.status(500).json({ status: "error", message: "Error al cargar el pedido." });
-        if (!pedido) return res.status(404).json({ status: "error", message: "Pedido no encontrado." });
-        if (!pedido.equipo.some(i => String(i.FK_Matricula) === matricula)) return res.status(403).json({ status: "error", message: "No perteneces a este pedido." });
-        if (pedido.FK_Estado !== 2 || !pedido.FK_Casillero) return res.status(409).json({ status: "error", message: "Este pedido no tiene un casillero activo." });
-        try {
-            res.json({ status: "success", qr: await qrDataUrl(pedido) });
-        } catch (e) {
-            res.status(500).json({ status: "error", message: "No se pudo generar el código QR." });
-        }
-    });
+app.get('/api/pedidos/:id/qr', soloAlumno, async (req, res) => {
+    const { pedido } = await pedidoAutorizado(req, { soloIntegrante: true });
+    if (pedido.FK_Estado !== 2 || !pedido.FK_Casillero) throw new ErrorHttp(409, 'Este pedido no tiene un casillero activo.');
+    res.json({ status: 'success', qr: await qrDataUrl(pedido) });
 });
 
-// Verifica un QR escaneado. Solo los QR generados por este servidor son válidos.
-//  - Panel del administrador:   POST /api/qr/verificar  { "codigo": "SSC2..." }  → JSON
-//  - Casillero (ESP32 + GM60):  POST/GET /api/qr/verificar?formato=texto&codigo=SSC2...
+// Envía el pase (con el QR cifrado) al correo del alumno con sesión; debe ser integrante del pedido.
+app.post('/api/pedidos/:id/enviar-pase', soloAlumno, seg.limites.correo, async (req, res) => {
+    const { pedido, integrante } = await pedidoAutorizado(req, { soloIntegrante: true });
+    if (!integrante.Email) throw new ErrorHttp(409, 'Tu cuenta no tiene un correo registrado.');
+    if (pedido.FK_Estado !== 2 || !pedido.FK_Casillero) throw new ErrorHttp(409, 'Este pedido no tiene un casillero activo.');
+    const qr = await qrBuffer(pedido);
+    const ok = await correoPase(integrante.Email, integrante.Nombre, pedido, qr);
+    if (!ok) throw new ErrorHttp(503, 'No se pudo enviar el correo. Intenta más tarde.');
+    res.json({ status: 'success', message: `Pase enviado a ${integrante.Email}` });
+});
+
+// =======================================================
+// VERIFICACIÓN DE QR (panel del administrador y casillero físico)
+// =======================================================
+//  - Panel del administrador (con sesión):  POST /api/qr/verificar  { "codigo": "SSC2..." }  → JSON
+//  - Casillero (ESP32 + GM60), con el encabezado  X-API-Key: <CASILLERO_API_KEY>:
+//      POST/GET /api/qr/verificar?formato=texto&codigo=SSC2...
 //      responde texto plano "OK <número de casillero>" (abrir esa puerta) o "NO <motivo>"
 //      Opcional: &casillero=3 para que la puerta solo acepte códigos de su propio casillero.
-function verificarQR(req, res) {
-    const codigo = req.body?.codigo ?? req.query.codigo;
+async function verificarQR(req, res) {
     const enTexto = req.query.formato === 'texto';
-    const casilleroLector = req.query.casillero ? Number(req.query.casillero) : null;
     const responder = (http, cuerpo, texto) => (enTexto ? res.status(http).type('text/plain').send(texto) : res.status(http).json(cuerpo));
 
-    const datos = leerToken(codigo);
-    if (!datos) return responder(400, { valido: false, message: "Código QR no válido: no fue generado por Safe Stock CETI o fue alterado." }, 'NO CODIGO_INVALIDO');
-    obtenerDetallePedido(datos.p, (err, pedido) => {
-        if (err) return responder(500, { valido: false, message: "Error al consultar el pedido." }, 'NO ERROR_SERVIDOR');
-        if (!pedido) return responder(404, { valido: false, message: "El pedido de este código ya no existe." }, 'NO PEDIDO_INEXISTENTE');
-        if (pedido.FK_Estado !== 2 || pedido.FK_Casillero !== datos.c) {
-            return responder(409, { valido: false, message: `El código es auténtico, pero el pedido ya no está activo en ese casillero (estado: ${pedido.Estado}).` }, 'NO PEDIDO_INACTIVO');
-        }
-        if (casilleroLector && casilleroLector !== pedido.FK_Casillero) {
-            return responder(409, { valido: false, message: `Este código es del casillero ${pedido.FK_Casillero}, no de este.` }, `NO OTRO_CASILLERO ${pedido.FK_Casillero}`);
-        }
-        const nombreCelda = pedido.Casillero || `Casillero ${pedido.FK_Casillero}`;
-        responder(200, {
-            valido: true,
-            message: `Acceso autorizado a ${nombreCelda}.`,
-            pedido: {
-                id: pedido.ID_Pedido,
-                casilleroId: pedido.FK_Casillero,
-                casillero: nombreCelda,
-                solicitante: `${pedido.Solicitante_Nombre || ''} ${pedido.Solicitante_Apellido || ''}`.trim(),
-                matricula: pedido.Solicitante_Matricula,
-                fecha: pedido.Fecha_Recogida,
-                horario: `${pedido.Hora_Recogida || ''} – ${pedido.Hora_Devolucion || ''}`,
-                materiales: pedido.materiales.map(m => ({ nombre: m.Nombre, cantidad: m.Cantidad })),
-            },
-        }, `OK ${pedido.FK_Casillero}`);
-    });
-}
-app.post('/api/qr/verificar', verificarQR);
-app.get('/api/qr/verificar', verificarQR);
+    const esAdmin = req.usuario?.rol === 'admin';
+    const esCasillero = seg.claveCasilleroValida(req);
+    if (!esAdmin && !esCasillero) {
+        registrar('QR_SIN_AUTORIZACION', { req, nivel: 'alerta', detalle: req.get('x-api-key') ? 'API key incorrecta' : 'Sin sesión ni API key' });
+        seg.sospecha(req, 3);
+        return responder(401, { valido: false, status: 'error', message: 'No autorizado.' }, 'NO NO_AUTORIZADO');
+    }
+    const origen = esAdmin ? 'panel' : 'casillero';
 
-// Envía el pase (con el QR cifrado) al correo del alumno que lo pide; debe ser integrante del pedido.
-app.post('/api/pedidos/:id/enviar-pase', (req, res) => {
-    const { matricula } = req.body;
-    obtenerDetallePedido(req.params.id, async (err, pedido) => {
-        if (err) return res.status(500).json({ status: "error", message: "Error al cargar el pedido." });
-        if (!pedido) return res.status(404).json({ status: "error", message: "Pedido no encontrado." });
-        const integrante = pedido.equipo.find(i => String(i.FK_Matricula) === String(matricula));
-        if (!integrante || !integrante.Email) return res.status(403).json({ status: "error", message: "No perteneces a este pedido." });
-        if (pedido.FK_Estado !== 2 || !pedido.FK_Casillero) return res.status(409).json({ status: "error", message: "Este pedido no tiene un casillero activo." });
-        let qr;
-        try { qr = await qrBuffer(pedido); } catch { return res.status(500).json({ status: "error", message: "No se pudo generar el código QR." }); }
-        const ok = await correoPase(integrante.Email, integrante.Nombre, pedido, qr);
-        if (!ok) return res.status(500).json({ status: "error", message: "No se pudo enviar el correo." });
-        res.json({ status: "success", message: `Pase enviado a ${integrante.Email}` });
-    });
-});
+    const codigo = esquemas.codigoQR.safeParse(req.body?.codigo ?? req.query.codigo);
+    const casilleroLector = /^\d{1,3}$/.test(String(req.query.casillero || '')) ? Number(req.query.casillero) : null;
+    const datos = codigo.success ? leerToken(codigo.data) : null;
+    if (!datos) {
+        registrar('QR_INVALIDO', { req, nivel: 'alerta', usuario: origen, detalle: 'Código falso, alterado o ilegible' });
+        seg.sospecha(req);
+        return responder(400, { valido: false, message: 'Código QR no válido: no fue generado por Safe Stock CETI o fue alterado.' }, 'NO CODIGO_INVALIDO');
+    }
+
+    let pedido;
+    try {
+        pedido = await obtenerDetallePedido(datos.p);
+    } catch (err) {
+        console.error('Error al verificar QR:', err.code || err.message);
+        return responder(500, { valido: false, message: 'Error al consultar el pedido.' }, 'NO ERROR_SERVIDOR');
+    }
+    if (!pedido) return responder(404, { valido: false, message: 'El pedido de este código ya no existe.' }, 'NO PEDIDO_INEXISTENTE');
+    if (pedido.FK_Estado !== 2 || pedido.FK_Casillero !== datos.c) {
+        registrar('QR_PEDIDO_INACTIVO', { req, usuario: origen, detalle: `Pedido ${pedido.ID_Pedido} (${pedido.Estado})` });
+        return responder(409, { valido: false, message: `El código es auténtico, pero el pedido ya no está activo en ese casillero (estado: ${pedido.Estado}).` }, 'NO PEDIDO_INACTIVO');
+    }
+    if (casilleroLector && casilleroLector !== pedido.FK_Casillero) {
+        return responder(409, { valido: false, message: `Este código es del casillero ${pedido.FK_Casillero}, no de este.` }, `NO OTRO_CASILLERO ${pedido.FK_Casillero}`);
+    }
+    const nombreCelda = pedido.Casillero || `Casillero ${pedido.FK_Casillero}`;
+    registrar('QR_ACCESO_AUTORIZADO', { req, usuario: origen, detalle: `Pedido ${pedido.ID_Pedido} → ${nombreCelda}` });
+    responder(200, {
+        valido: true,
+        message: `Acceso autorizado a ${nombreCelda}.`,
+        pedido: {
+            id: pedido.ID_Pedido,
+            casilleroId: pedido.FK_Casillero,
+            casillero: nombreCelda,
+            solicitante: `${pedido.Solicitante_Nombre || ''} ${pedido.Solicitante_Apellido || ''}`.trim(),
+            matricula: pedido.Solicitante_Matricula,
+            fecha: pedido.Fecha_Recogida,
+            horario: `${pedido.Hora_Recogida || ''} – ${pedido.Hora_Devolucion || ''}`,
+            materiales: pedido.materiales.map((m) => ({ nombre: m.Nombre, cantidad: m.Cantidad })),
+        },
+    }, `OK ${pedido.FK_Casillero}`);
+}
+app.post('/api/qr/verificar', seg.limites.qr, verificarQR);
+app.get('/api/qr/verificar', seg.limites.qr, verificarQR);
 
 // Al aprobar: cada integrante recibe su casillero y el QR cifrado.
-function notificarAprobacion(idPedido) {
-    obtenerDetallePedido(idPedido, async (err, pedido) => {
-        if (err || !pedido) return console.error('No se pudo notificar la aprobación de', idPedido);
+async function notificarAprobacion(idPedido) {
+    try {
+        const pedido = await obtenerDetallePedido(idPedido);
+        if (!pedido) return;
         let qr = null;
         try { qr = await qrBuffer(pedido); } catch (e) { console.error('No se pudo generar el QR de', idPedido, e.message); }
-        pedido.equipo.forEach(i => i.Email && correoAprobado(i.Email, i.Nombre, pedido, qr));
-    });
+        pedido.equipo.forEach((i) => i.Email && correoAprobado(i.Email, i.Nombre, pedido, qr));
+    } catch (err) {
+        console.error('No se pudo notificar la aprobación de', idPedido, err.code || err.message);
+    }
 }
 
 // Al rechazar: cada integrante recibe el motivo.
-function notificarRechazo(idPedido) {
-    obtenerDetallePedido(idPedido, (err, pedido) => {
-        if (err || !pedido) return console.error('No se pudo notificar el rechazo de', idPedido);
-        pedido.equipo.forEach(i => i.Email && correoRechazado(i.Email, i.Nombre, pedido));
-    });
+async function notificarRechazo(idPedido) {
+    try {
+        const pedido = await obtenerDetallePedido(idPedido);
+        if (pedido) pedido.equipo.forEach((i) => i.Email && correoRechazado(i.Email, i.Nombre, pedido));
+    } catch (err) {
+        console.error('No se pudo notificar el rechazo de', idPedido, err.code || err.message);
+    }
 }
 
-// --- VENTANILLA 8: OBTENER EL MAPA DE CASILLEROS ---
-app.get('/api/casilleros', (req, res) => {
-    const query = 'SELECT * FROM Casillero'; 
-    db.query(query, (err, resultados) => {
-        if (err) return res.status(500).json({ error: "Error interno al cargar el mapa" });
-        res.status(200).json(resultados);
-    });
-});
-
 // =======================================================
-// NUEVAS RUTAS DE CONTROL DE CASILLEROS (ADMIN)
+// ADMINISTRADOR: PEDIDOS  (todo /api/admin exige rol admin, ver arriba)
 // =======================================================
+app.get('/api/admin/pedidos', async (req, res) => {
+    const pedidosDb = await consultar('SELECT ID_Pedido, Fecha_Recogida, Proposito FROM pedido WHERE FK_Estado = 1 ORDER BY Fecha_Recogida ASC');
+    if (pedidosDb.length === 0) return res.json([]);
+    const ids = pedidosDb.map((p) => p.ID_Pedido);
 
-// --- VENTANILLA 9: ADMIN - ACTUALIZAR ESTADO NORMAL (Libre / Mantenimiento) ---
-app.put('/api/admin/casilleros/:id/estado', (req, res) => {
-    const idCasillero = req.params.id;
-    const { nuevo_estado } = req.body; 
+    const [equipoDb, materialesDb] = await Promise.all([
+        consultar(`SELECT ep.FK_Pedido, ep.FK_Matricula, a.Nombre, ep.Rol FROM equipo_pedido ep
+                   JOIN alumno a ON ep.FK_Matricula = a.Registro_Alu WHERE ep.FK_Pedido IN (?)`, [ids]),
+        consultar(`SELECT dp.FK_Pedido, m.Nombre, dp.Cantidad FROM detalle_pedido dp
+                   JOIN material m ON dp.FK_Material = m.ID_Material WHERE dp.FK_Pedido IN (?)`, [ids]),
+    ]);
 
-    if (![1, 3].includes(Number(nuevo_estado))) {
-        return res.status(400).json({ status: "error", message: "Solo se puede cambiar a Libre o Mantenimiento." });
-    }
+    res.json(pedidosDb.map((pedido) => {
+        const integrantes = equipoDb.filter((e) => e.FK_Pedido === pedido.ID_Pedido);
+        const lider = integrantes.find((e) => e.Rol === 'Líder') || integrantes[0];
+        const colaboradores = integrantes.filter((e) => e !== lider);
 
-    // No se puede cambiar a mano un casillero ocupado: primero hay que liberarlo.
-    const queryUpdate = "UPDATE casillero SET FK_Estado = ? WHERE ID_Casillero = ? AND Fk_Estado <> 2";
-    db.query(queryUpdate, [Number(nuevo_estado), idCasillero], (err, r) => {
-        if (err) return res.status(500).json({ status: "error", message: "Error al actualizar." });
-        if (r.affectedRows === 0) return res.status(409).json({ status: "error", message: "El casillero está ocupado o no existe." });
-        res.status(200).json({ status: "success", message: "Estado actualizado." });
-    });
-});
-
-// --- VENTANILLA 10: ADMIN - VER QUIÉN OCUPA EL CASILLERO ---
-app.get('/api/admin/casilleros/:id/pedido', (req, res) => {
-    const idCasillero = req.params.id;
-    // Buscamos el pedido Aprobado (Estado = 2) asignado a este casillero
-    const query = `
-        SELECT p.ID_Pedido, p.Proposito, a.Nombre AS Solicitante, a.Registro_Alu
-        FROM pedido p
-        JOIN alumno a ON p.FK_Solicitante = a.Registro_Alu
-        WHERE p.FK_Casillero = ? AND p.FK_Estado = 2
-        LIMIT 1
-    `;
-    db.query(query, [idCasillero], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(result.length > 0 ? result[0] : null);
-    });
-});
-
-// --- VENTANILLA 11: ADMIN - FORZAR DEVOLUCIÓN (LIBERAR Y DEVOLVER STOCK) ---
-app.put('/api/admin/casilleros/:id/liberar', (req, res) => {
-    const idCasillero = req.params.id;
-    
-    db.beginTransaction(err => {
-        if (err) return res.status(500).json({status: 'error', message: 'Error de BD'});
-        
-        // 1. Buscamos el pedido activo en este casillero
-        db.query("SELECT ID_Pedido FROM pedido WHERE FK_Casillero = ? AND FK_Estado = 2 LIMIT 1", [idCasillero], (err, pedidos) => {
-            if (err) return db.rollback(() => res.status(500).json({error: err.message}));
-            
-            if (pedidos.length === 0) {
-                // Si por alguna razón está ocupado pero no hay pedido, solo liberamos el casillero a la fuerza
-                db.query("UPDATE casillero SET FK_Estado = 1 WHERE ID_Casillero = ?", [idCasillero], () => {
-                    db.commit(() => res.json({status: 'success', message: 'Casillero liberado (No había pedido activo).'}));
-                });
-                return;
-            }
-            
-            const idPedido = pedidos[0].ID_Pedido;
-            
-            // 2. Liberar el casillero (Estado = 1)
-            db.query("UPDATE casillero SET FK_Estado = 1 WHERE ID_Casillero = ?", [idCasillero], (err) => {
-                if (err) return db.rollback(() => res.status(500).json({error: err.message}));
-                
-                // 3. Marcar pedido como Finalizado/Devuelto (Usaremos el estado 4) y desvincular el casillero
-                db.query("UPDATE pedido SET FK_Estado = 5, FK_Casillero = NULL WHERE ID_Pedido = ?", [idPedido], (err) => {
-                    if (err) return db.rollback(() => res.status(500).json({error: err.message}));
-                    
-                    // 4. Leer los materiales que se prestaron
-                    db.query("SELECT FK_Material, Cantidad FROM detalle_pedido WHERE FK_Pedido = ?", [idPedido], (err, detalles) => {
-                        if (err) return db.rollback(() => res.status(500).json({error: err.message}));
-                        
-                        if (detalles.length === 0) return db.commit(() => res.json({status: 'success'}));
-                        
-                        // 5. Devolver cantidades al inventario
-                        let restaurados = 0;
-                        detalles.forEach(item => {
-                            db.query("UPDATE material SET Cantidad = Cantidad + ? WHERE ID_Material = ?", [item.Cantidad, item.FK_Material], (err) => {
-                                if (err) return db.rollback(() => res.status(500).json({error: err.message}));
-                                restaurados++;
-                                if (restaurados === detalles.length) {
-                                    db.commit(() => res.json({status: 'success', message: 'Casillero liberado y materiales devueltos al almacén.'}));
-                                }
-                            });
-                        });
-                    });
-                });
-            });
-        });
-    });
-});
-
-// --- RUTA PARA EL BUSCADOR PREDICTIVO DE ALUMNOS ---
-app.get('/api/alumnos/buscar', (req, res) => {
-    const busqueda = req.query.q;
-    if (!busqueda) return res.json([]);
-
-    const queryBuscar = `
-        SELECT Registro_Alu AS registro, Nombre AS nombre, Email AS correo 
-        FROM alumno 
-        WHERE Nombre LIKE ? OR Registro_Alu LIKE ? 
-        LIMIT 10
-    `;
-    
-    const parametroBusqueda = `%${busqueda}%`;
-    db.query(queryBuscar, [parametroBusqueda, parametroBusqueda], (err, resultados) => {
-        if (err) return res.status(500).json({ error: "Error interno del servidor" });
-        res.json(resultados);
-    });
-});
-
-// =======================================================
-// RUTAS DEL INVENTARIO (ADMINISTRADOR) CON IMÁGENES
-// =======================================================
-
-app.get('/api/admin/materiales', (req, res) => {
-    const queryBuscar = `
-        SELECT m.ID_Material, m.Nombre, m.Cantidad, m.Descripcion, m.FK_No_Categoria, c.Nombre_Categoria 
-        FROM material m 
-        JOIN categoria_material c ON m.FK_No_Categoria = c.No_Categoria
-    `;
-    db.query(queryBuscar, (err, resultados) => {
-        if (err) return res.status(500).json({ error: "Error al cargar el inventario" });
-        res.json(resultados);
-    });
-});
-
-app.post('/api/admin/materiales', upload.single('imagen'), (req, res) => {
-    const { ID_Material, Nombre, Cantidad, Descripcion, FK_No_Categoria } = req.body;
-    const queryInsertar = `
-        INSERT INTO material (ID_Material, Nombre, Cantidad, Descripcion, FK_No_Categoria) 
-        VALUES (?, ?, ?, ?, ?)
-    `;
-    db.query(queryInsertar, [ID_Material, Nombre, Cantidad, Descripcion, FK_No_Categoria], (err, resultado) => {
-        if (err) return res.status(500).json({ error: "Error al guardar el material", detalle: err });
-        res.json({ status: "success", message: "Material guardado correctamente" });
-    });
-});
-
-app.put('/api/admin/materiales/:id', upload.single('imagen'), (req, res) => {
-    const id = req.params.id;
-    const { Nombre, Cantidad, Descripcion, FK_No_Categoria } = req.body;
-    const queryActualizar = `
-        UPDATE material 
-        SET Nombre = ?, Cantidad = ?, Descripcion = ?, FK_No_Categoria = ? 
-        WHERE ID_Material = ?
-    `;
-    db.query(queryActualizar, [Nombre, Cantidad, Descripcion, FK_No_Categoria, id], (err, resultado) => {
-        if (err) return res.status(500).json({ error: "Error al actualizar el material" });
-        res.json({ status: "success", message: "Material actualizado" });
-    });
-});
-
-app.delete('/api/admin/materiales/:id', (req, res) => {
-    const id = req.params.id;
-    const queryEliminar = `DELETE FROM material WHERE ID_Material = ?`;
-    db.query(queryEliminar, [id], (err, resultado) => {
-        if (err) return res.status(500).json({ error: "Error al eliminar el material" });
-        res.json({ status: "success", message: "Material eliminado" });
-    });
-});
-
-// =======================================================
-// RUTAS DE USUARIOS (ADMINISTRADOR)
-// =======================================================
-
-app.get('/api/admin/usuarios', (req, res) => {
-    const queryBuscar = `
-        SELECT 
-            a.Registro_Alu, 
-            CONCAT(IFNULL(a.Nombre, ''), ' ', IFNULL(a.Apellido, '')) AS NombreCompleto,
-            a.Email, 
-            a.Telefono, 
-            a.FK_Semestre,
-            c.Nombre_Carrera 
-        FROM alumno a
-        LEFT JOIN carrera c ON a.FK_Carrera = c.ID_Carrera
-        ORDER BY a.Nombre ASC
-    `;
-    
-    db.query(queryBuscar, (err, resultados) => {
-        if (err) return res.status(500).json({ error: "Error al cargar la lista de usuarios" });
-        res.json(resultados);
-    });
-});
-
-app.delete('/api/admin/usuarios/:registro', (req, res) => {
-    const registro = req.params.registro;
-    const queryEliminar = `DELETE FROM alumno WHERE Registro_Alu = ?`;
-    
-    db.query(queryEliminar, [registro], (err, resultado) => {
-        if (err) {
-            if (err.code === 'ER_ROW_IS_REFERENCED_2') {
-                return res.status(400).json({ 
-                    status: "error", 
-                    message: "No se puede eliminar a este usuario porque tiene pedidos registrados en el historial de SafeStock." 
-                });
-            }
-            return res.status(500).json({ status: "error", message: "Error interno al eliminar el usuario." });
+        const fechaObj = new Date(pedido.Fecha_Recogida);
+        // La fecha puede venir ya escrita ("Martes 17 de noviembre, 2026") o como 2026-11-17.
+        let fechaBonita = String(pedido.Fecha_Recogida || '');
+        if (!Number.isNaN(fechaObj.getTime())) {
+            fechaBonita = fechaObj.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            fechaBonita = fechaBonita.charAt(0).toUpperCase() + fechaBonita.slice(1);
         }
-        res.json({ status: "success", message: "Usuario eliminado correctamente del sistema." });
+
+        return {
+            id: pedido.ID_Pedido,
+            fecha_recogida: fechaBonita,
+            esEquipo: colaboradores.length > 0,
+            solicitante: { matricula: lider ? lider.FK_Matricula : 'N/A', nombre: lider ? lider.Nombre : 'Desconocido' },
+            equipo: colaboradores.map((c) => ({ matricula: c.FK_Matricula, nombre: c.Nombre })),
+            proposito: pedido.Proposito,
+            materiales: materialesDb.filter((m) => m.FK_Pedido === pedido.ID_Pedido).map((m) => ({ nombre: m.Nombre, cantidad: m.Cantidad })),
+        };
+    }));
+});
+
+app.put('/api/admin/pedidos/:id/aprobar', async (req, res) => {
+    const idPedido = leer(esquemas.idPedido, req.params.id);
+    const { id_casillero } = leer(esquemas.aprobar, req.body);
+
+    await transaccion(async (q) => {
+        // El casillero elegido debe existir y estar libre: un casillero = un pedido.
+        const celdas = await q('SELECT FK_Estado AS estado FROM casillero WHERE ID_Casillero = ? FOR UPDATE', [id_casillero]);
+        if (celdas.length === 0) throw new ErrorHttp(404, 'Ese casillero no existe.');
+        if (celdas[0].estado !== 1) throw new ErrorHttp(409, 'Ese casillero ya no está libre. Elige otro.');
+
+        const pedidos = await q('SELECT FK_Estado AS estado FROM pedido WHERE ID_Pedido = ? FOR UPDATE', [idPedido]);
+        if (pedidos.length === 0) throw new ErrorHttp(404, 'El pedido no existe.');
+        if (pedidos[0].estado !== 1) throw new ErrorHttp(409, 'Este pedido ya fue procesado.');
+
+        await q('UPDATE pedido SET FK_Estado = 2, FK_Casillero = ? WHERE ID_Pedido = ?', [id_casillero, idPedido]);
+        await q('UPDATE casillero SET FK_Estado = 2 WHERE ID_Casillero = ?', [id_casillero]);
+
+        const detalles = await q(`SELECT dp.FK_Material, dp.Cantidad, m.Nombre FROM detalle_pedido dp
+                                  JOIN material m ON m.ID_Material = dp.FK_Material WHERE dp.FK_Pedido = ?`, [idPedido]);
+        for (const item of detalles) {
+            // El inventario nunca queda en negativo: si ya no alcanza, se deshace toda la aprobación.
+            const r = await q('UPDATE material SET Cantidad = Cantidad - ? WHERE ID_Material = ? AND Cantidad >= ?', [item.Cantidad, item.FK_Material, item.Cantidad]);
+            if (r.affectedRows === 0) throw new ErrorHttp(409, `Ya no hay existencias suficientes de ${item.Nombre}. Rechaza el pedido o ajusta el inventario.`);
+        }
+    });
+
+    registrar('PEDIDO_APROBADO', { req, detalle: `${idPedido} → casillero ${id_casillero}` });
+    res.json({ status: 'success', message: '¡Stock descontado y casillero ocupado!' });
+    notificarAprobacion(idPedido);
+});
+
+app.put('/api/admin/pedidos/:id/rechazar', async (req, res) => {
+    const idPedido = leer(esquemas.idPedido, req.params.id);
+    const { motivo } = leer(esquemas.rechazar, req.body);
+    // Solo se rechazan pedidos pendientes (estado 1). Se guarda el motivo para el alumno.
+    const r = await consultar('UPDATE pedido SET FK_Estado = 4, Motivo_Rechazo = ? WHERE ID_Pedido = ? AND FK_Estado = 1', [motivo, idPedido]);
+    if (r.affectedRows === 0) throw new ErrorHttp(409, 'Este pedido ya fue procesado o no existe.');
+    registrar('PEDIDO_RECHAZADO', { req, detalle: idPedido });
+    res.json({ status: 'success', message: 'Pedido rechazado y removido de la lista.' });
+    notificarRechazo(idPedido);
+});
+
+// =======================================================
+// ADMINISTRADOR: CASILLEROS
+// =======================================================
+app.put('/api/admin/casilleros/:id/estado', async (req, res) => {
+    const idCasillero = leer(esquemas.idNumerico, req.params.id);
+    const { nuevo_estado } = leer(esquemas.estadoCasillero, req.body);
+    // No se puede cambiar a mano un casillero ocupado: primero hay que liberarlo.
+    const r = await consultar('UPDATE casillero SET FK_Estado = ? WHERE ID_Casillero = ? AND FK_Estado <> 2', [nuevo_estado, idCasillero]);
+    if (r.affectedRows === 0) throw new ErrorHttp(409, 'El casillero está ocupado o no existe.');
+    registrar('CASILLERO_ESTADO', { req, detalle: `Casillero ${idCasillero} → estado ${nuevo_estado}` });
+    res.json({ status: 'success', message: 'Estado actualizado.' });
+});
+
+app.get('/api/admin/casilleros/:id/pedido', async (req, res) => {
+    const idCasillero = leer(esquemas.idNumerico, req.params.id);
+    const [pedido] = await consultar(`
+        SELECT p.ID_Pedido, p.Proposito, a.Nombre AS Solicitante, a.Registro_Alu
+        FROM pedido p JOIN alumno a ON p.FK_Solicitante = a.Registro_Alu
+        WHERE p.FK_Casillero = ? AND p.FK_Estado = 2 LIMIT 1`, [idCasillero]);
+    res.json(pedido || null);
+});
+
+// Liberar casillero: el pedido pasa a Devuelto y el material regresa al inventario.
+app.put('/api/admin/casilleros/:id/liberar', async (req, res) => {
+    const idCasillero = leer(esquemas.idNumerico, req.params.id);
+
+    const idPedido = await transaccion(async (q) => {
+        const pedidos = await q('SELECT ID_Pedido FROM pedido WHERE FK_Casillero = ? AND FK_Estado = 2 LIMIT 1 FOR UPDATE', [idCasillero]);
+        await q('UPDATE casillero SET FK_Estado = 1 WHERE ID_Casillero = ?', [idCasillero]);
+        if (pedidos.length === 0) return null; // estaba ocupado sin pedido: solo se libera
+
+        const folio = pedidos[0].ID_Pedido;
+        await q('UPDATE pedido SET FK_Estado = 5, FK_Casillero = NULL WHERE ID_Pedido = ?', [folio]);
+        const detalles = await q('SELECT FK_Material, Cantidad FROM detalle_pedido WHERE FK_Pedido = ?', [folio]);
+        for (const item of detalles) {
+            await q('UPDATE material SET Cantidad = Cantidad + ? WHERE ID_Material = ?', [item.Cantidad, item.FK_Material]);
+        }
+        return folio;
+    });
+
+    registrar('CASILLERO_LIBERADO', { req, detalle: `Casillero ${idCasillero}${idPedido ? `, pedido ${idPedido}` : ''}` });
+    res.json({
+        status: 'success',
+        message: idPedido ? 'Casillero liberado y materiales devueltos al almacén.' : 'Casillero liberado (No había pedido activo).',
     });
 });
 
 // =======================================================
-// RUTAS DE ESTADÍSTICAS (ADMINISTRADOR)
+// ADMINISTRADOR: INVENTARIO CON IMÁGENES
+// =======================================================
+// La imagen se recibe en memoria y solo se guarda en disco después de validar el
+// formulario y de comprobar que el archivo es de verdad una imagen (no basta la extensión).
+const CARPETA_IMAGENES = path.join(__dirname, '../frontend/public/images');
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 3 * 1024 * 1024, files: 1, fields: 20, fieldSize: 10 * 1024 },
+    fileFilter: (req, file, cb) => {
+        if (['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) return cb(null, true);
+        cb(new ErrorHttp(400, 'La imagen debe ser JPG, PNG o WEBP.'));
+    },
+});
+
+function esImagenReal(b) {
+    if (!b || b.length < 12) return false;
+    const jpg = b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF;
+    const png = b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]));
+    const webp = b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP';
+    return jpg || png || webp;
+}
+
+async function guardarImagen(req, idMaterial) {
+    if (!req.file) return;
+    // idMaterial ya está validado como número entero: no puede contener "../" ni otra ruta.
+    await fs.promises.writeFile(path.join(CARPETA_IMAGENES, `${idMaterial}.jpg`), req.file.buffer);
+}
+
+const validarImagen = (req) => {
+    if (req.file && !esImagenReal(req.file.buffer)) {
+        registrar('ARCHIVO_RECHAZADO', { req, nivel: 'alerta', detalle: 'El archivo subido no es una imagen real' });
+        throw new ErrorHttp(400, 'El archivo no es una imagen válida.');
+    }
+};
+
+app.get('/api/admin/materiales', async (req, res) => {
+    res.json(await consultar(`
+        SELECT m.ID_Material, m.Nombre, m.Cantidad, m.Descripcion, m.FK_No_Categoria, c.Nombre_Categoria
+        FROM material m JOIN categoria_material c ON m.FK_No_Categoria = c.No_Categoria`));
+});
+
+app.post('/api/admin/materiales', upload.single('imagen'), async (req, res) => {
+    const d = leer(esquemas.material, req.body);
+    validarImagen(req);
+    try {
+        await consultar('INSERT INTO material (ID_Material, Nombre, Cantidad, Descripcion, FK_No_Categoria) VALUES (?, ?, ?, ?, ?)',
+            [d.ID_Material, d.Nombre, d.Cantidad, d.Descripcion, d.FK_No_Categoria]);
+    } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') throw new ErrorHttp(400, 'Ya existe un material con ese ID.');
+        if (err.code === 'ER_NO_REFERENCED_ROW_2') throw new ErrorHttp(400, 'La categoría seleccionada no existe.');
+        throw err;
+    }
+    await guardarImagen(req, d.ID_Material);
+    registrar('MATERIAL_CREADO', { req, detalle: `${d.ID_Material} ${d.Nombre}` });
+    res.json({ status: 'success', message: 'Material guardado correctamente' });
+});
+
+app.put('/api/admin/materiales/:id', upload.single('imagen'), async (req, res) => {
+    const id = leer(esquemas.idNumerico, req.params.id);
+    const d = leer(esquemas.material, { ...req.body, ID_Material: id });
+    validarImagen(req);
+    try {
+        const r = await consultar('UPDATE material SET Nombre = ?, Cantidad = ?, Descripcion = ?, FK_No_Categoria = ? WHERE ID_Material = ?',
+            [d.Nombre, d.Cantidad, d.Descripcion, d.FK_No_Categoria, id]);
+        if (r.affectedRows === 0) throw new ErrorHttp(404, 'Material no encontrado.');
+    } catch (err) {
+        if (err.code === 'ER_NO_REFERENCED_ROW_2') throw new ErrorHttp(400, 'La categoría seleccionada no existe.');
+        throw err;
+    }
+    await guardarImagen(req, id);
+    registrar('MATERIAL_EDITADO', { req, detalle: `${id} ${d.Nombre} (cantidad ${d.Cantidad})` });
+    res.json({ status: 'success', message: 'Material actualizado' });
+});
+
+app.delete('/api/admin/materiales/:id', async (req, res) => {
+    const id = leer(esquemas.idNumerico, req.params.id);
+    try {
+        const r = await consultar('DELETE FROM material WHERE ID_Material = ?', [id]);
+        if (r.affectedRows === 0) throw new ErrorHttp(404, 'Material no encontrado.');
+    } catch (err) {
+        if (err.code === 'ER_ROW_IS_REFERENCED_2') throw new ErrorHttp(400, 'No se puede eliminar: este material aparece en pedidos o reportes registrados.');
+        throw err;
+    }
+    registrar('MATERIAL_ELIMINADO', { req, nivel: 'alerta', detalle: `Material ${id}` });
+    res.json({ status: 'success', message: 'Material eliminado' });
+});
+
+// =======================================================
+// ADMINISTRADOR: USUARIOS
+// =======================================================
+app.get('/api/admin/usuarios', async (req, res) => {
+    // Solo las columnas necesarias: la contraseña (hash) nunca se consulta ni se envía.
+    res.json(await consultar(`
+        SELECT a.Registro_Alu, CONCAT(IFNULL(a.Nombre, ''), ' ', IFNULL(a.Apellido, '')) AS NombreCompleto,
+               a.Email, a.Telefono, a.FK_Semestre, a.Ciclo_Semestre, c.Nombre_Carrera
+        FROM alumno a LEFT JOIN carrera c ON a.FK_Carrera = c.ID_Carrera
+        ORDER BY a.Nombre ASC`));
+});
+
+app.delete('/api/admin/usuarios/:registro', async (req, res) => {
+    const registro = leer(esquemas.matricula, req.params.registro);
+    try {
+        const r = await consultar('DELETE FROM alumno WHERE Registro_Alu = ?', [registro]);
+        if (r.affectedRows === 0) throw new ErrorHttp(404, 'Usuario no encontrado.');
+    } catch (err) {
+        if (err.code === 'ER_ROW_IS_REFERENCED_2') {
+            throw new ErrorHttp(400, 'No se puede eliminar a este usuario porque tiene pedidos registrados en el historial de SafeStock.');
+        }
+        throw err;
+    }
+    registrar('USUARIO_ELIMINADO', { req, nivel: 'alerta', detalle: `Alumno ${registro}` });
+    res.json({ status: 'success', message: 'Usuario eliminado correctamente del sistema.' });
+});
+
+// =======================================================
+// ADMINISTRADOR: ESTADÍSTICAS
 // Reporte MENSUAL: GET /api/admin/estadisticas?mes=AAAA-MM
 // =======================================================
 
@@ -865,16 +765,8 @@ app.delete('/api/admin/usuarios/:registro', (req, res) => {
 const FILTRO_PRESTAMOS = "p.FK_Estado NOT IN (1, 4, 6, 7)";
 const FILTRO_MES = "DATE_FORMAT(p.Fecha_Solicitud, '%Y-%m') = ?";
 
-// Envuelve db.query en una promesa para lanzar varias consultas a la vez
-const consultar = (sql, parametros) => new Promise((resolve, reject) => {
-    db.query(sql, parametros, (err, resultados) => (err ? reject(err) : resolve(resultados)));
-});
-
 app.get('/api/admin/estadisticas', async (req, res) => {
-    const mes = req.query.mes;
-    if (!/^\d{4}-\d{2}$/.test(mes || '')) {
-        return res.status(400).json({ error: "Indica el mes en formato AAAA-MM" });
-    }
+    const mes = leer(esquemas.mes, req.query.mes);
 
     const queryTotal = `SELECT COUNT(*) AS total FROM pedido p WHERE ${FILTRO_PRESTAMOS} AND ${FILTRO_MES}`;
 
@@ -957,45 +849,39 @@ app.get('/api/admin/estadisticas', async (req, res) => {
         ORDER BY s.ID_Semestre ASC
     `;
 
-    try {
-        const [total, totalAnterior, prestamosPorEstado, porSemana, topHerramientas, porCategoria, horasPico, porDiaSemana, semestres] =
-            await Promise.all([
-                consultar(queryTotal, [mes]),
-                consultar(queryTotalAnterior, [mes]),
-                consultar(queryEstados, [mes]),
-                consultar(querySemanas, [mes]),
-                consultar(queryTop, [mes]),
-                consultar(queryCategorias, [mes]),
-                consultar(queryHoras, [mes]),
-                consultar(queryDias, [mes]),
-                consultar(querySemestres, [mes]),
-            ]);
+    const [total, totalAnterior, prestamosPorEstado, porSemana, topHerramientas, porCategoria, horasPico, porDiaSemana, semestres] =
+        await Promise.all([
+            consultar(queryTotal, [mes]),
+            consultar(queryTotalAnterior, [mes]),
+            consultar(queryEstados, [mes]),
+            consultar(querySemanas, [mes]),
+            consultar(queryTop, [mes]),
+            consultar(queryCategorias, [mes]),
+            consultar(queryHoras, [mes]),
+            consultar(queryDias, [mes]),
+            consultar(querySemestres, [mes]),
+        ]);
 
-        res.json({
-            mes,
-            totalPrestamos: total[0].total,
-            totalMesAnterior: totalAnterior[0].total,
-            prestamosPorEstado,
-            porSemana,
-            topHerramientas,
-            porCategoria,
-            horasPico,
-            porDiaSemana,
-            semestres
-        });
-    } catch (err) {
-        console.error("Error al calcular estadísticas:", err);
-        res.status(500).json({ error: "Error al calcular las estadísticas del mes" });
-    }
+    res.json({
+        mes,
+        totalPrestamos: total[0].total,
+        totalMesAnterior: totalAnterior[0].total,
+        prestamosPorEstado,
+        porSemana,
+        topHerramientas,
+        porCategoria,
+        horasPico,
+        porDiaSemana,
+        semestres,
+    });
 });
 
 // =======================================================
-// RUTAS DE REPORTES DE FALLA (ADMINISTRADOR)
+// ADMINISTRADOR: REPORTES DE FALLA
 // Requiere la tabla de backend/sql/reporte_falla.sql
 // =======================================================
-
-app.get('/api/admin/fallas', (req, res) => {
-    const queryFallas = `
+app.get('/api/admin/fallas', async (req, res) => {
+    res.json(await consultar(`
         SELECT f.ID_Falla AS id, DATE_FORMAT(f.Fecha_Reporte, '%Y-%m-%dT%H:%i:%s') AS fecha, f.FK_Material AS materialId,
                m.Nombre AS materialNombre, c.Nombre_Categoria AS categoria, f.Cantidad AS cantidad,
                f.Tipo_Falla AS tipo, f.Severidad AS severidad, f.Estado AS estado,
@@ -1004,51 +890,103 @@ app.get('/api/admin/fallas', (req, res) => {
         FROM reporte_falla f
         JOIN material m ON f.FK_Material = m.ID_Material
         LEFT JOIN categoria_material c ON m.FK_No_Categoria = c.No_Categoria
-        ORDER BY f.Fecha_Reporte DESC
-    `;
-
-    db.query(queryFallas, (err, resultados) => {
-        if (err) return res.status(500).json({ error: "Error al cargar los reportes de falla" });
-        res.json(resultados);
-    });
+        ORDER BY f.Fecha_Reporte DESC`));
 });
 
-app.post('/api/admin/fallas', (req, res) => {
-    const { materialId, cantidad, tipo, severidad, pedido, matricula, descripcion, reportadoPor } = req.body;
-
-    if (!materialId || !tipo || !severidad || !descripcion || !reportadoPor) {
-        return res.status(400).json({ status: "error", message: "Faltan datos obligatorios del reporte." });
+app.post('/api/admin/fallas', async (req, res) => {
+    const d = leer(esquemas.falla, req.body);
+    // Quién reporta se toma de la sesión, no del formulario: no se puede firmar a nombre de otro.
+    const reportadoPor = (req.usuario.nombre || req.usuario.email || 'Administrador').slice(0, 100);
+    let resultado;
+    try {
+        resultado = await consultar(
+            `INSERT INTO reporte_falla (FK_Material, Cantidad, Tipo_Falla, Severidad, FK_Pedido, FK_Matricula, Descripcion, Reportado_Por)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [d.materialId, d.cantidad, d.tipo, d.severidad, d.pedido || null, d.matricula || null, d.descripcion, reportadoPor]);
+    } catch (err) {
+        if (err.code === 'ER_NO_REFERENCED_ROW_2') throw new ErrorHttp(400, 'El material indicado no existe.');
+        throw err;
     }
+    registrar('FALLA_REPORTADA', { req, detalle: `Material ${d.materialId}, ${d.severidad}` });
+    res.status(201).json({ status: 'success', message: 'Reporte de falla registrado.', id: resultado.insertId });
+});
 
-    const queryInsertar = `
-        INSERT INTO reporte_falla (FK_Material, Cantidad, Tipo_Falla, Severidad, FK_Pedido, FK_Matricula, Descripcion, Reportado_Por)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-    const valores = [materialId, cantidad || 1, tipo, severidad, pedido || null, matricula || null, descripcion, reportadoPor];
+app.put('/api/admin/fallas/:id/estado', async (req, res) => {
+    const id = leer(esquemas.idNumerico, req.params.id);
+    const { estado } = leer(esquemas.estadoFalla, req.body);
+    await consultar('UPDATE reporte_falla SET Estado = ? WHERE ID_Falla = ?', [estado, id]);
+    res.json({ status: 'success', message: 'Estado actualizado.' });
+});
 
-    db.query(queryInsertar, valores, (err, resultado) => {
-        if (err) {
-            console.error("Error al registrar falla:", err);
-            return res.status(500).json({ status: "error", message: "Error al registrar el reporte de falla." });
+// =======================================================
+// ADMINISTRADOR: BITÁCORA DE SEGURIDAD
+// =======================================================
+app.get('/api/admin/bitacora', async (req, res) => {
+    const { nivel, limite } = leer(esquemas.bitacora, { nivel: req.query.nivel || undefined, limite: req.query.limite || undefined });
+    const [eventos, resumen] = await Promise.all([
+        consultar(
+            `SELECT ID AS id, DATE_FORMAT(Fecha, '%Y-%m-%dT%H:%i:%s') AS fecha, Nivel AS nivel, Evento AS evento, IP AS ip,
+                    Usuario AS usuario, Rol AS rol, Metodo AS metodo, Ruta AS ruta, Detalle AS detalle
+             FROM bitacora_seguridad ${nivel ? 'WHERE Nivel = ?' : ''} ORDER BY ID DESC LIMIT ?`,
+            nivel ? [nivel, limite] : [limite]),
+        consultar(`SELECT Nivel AS nivel, COUNT(*) AS total FROM bitacora_seguridad
+                   WHERE Fecha > (NOW() - INTERVAL 1 DAY) GROUP BY Nivel`),
+    ]);
+    res.json({ eventos, ultimas24h: Object.fromEntries(resumen.map((r) => [r.nivel, r.total])) });
+});
+
+// =======================================================
+// RUTAS INEXISTENTES Y MANEJO CENTRAL DE ERRORES
+// =======================================================
+app.use((req, res, next) => {
+    // Los escáneres automáticos prueban rutas al azar (/admin.php, /.env, ...): se anota.
+    registrar('RUTA_INEXISTENTE', { req, nivel: 'alerta' });
+    seg.sospecha(req);
+    next(new ErrorHttp(404, 'Recurso no encontrado.'));
+});
+
+// El usuario recibe un mensaje útil, pero NUNCA detalles internos (consultas SQL,
+// nombres de tablas, rutas de archivos). El detalle completo queda solo en el servidor,
+// ligado a un código que el usuario puede compartir con el administrador.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+    let http = 500;
+    let mensaje;
+
+    if (err instanceof ErrorHttp) {
+        http = err.http;
+        mensaje = err.message;
+        if (http === 400 && err.extra.validacion) {
+            // Casi siempre es un descuido del usuario: se anota como 'info', pero cuenta para detectar abuso.
+            registrar('DATOS_INVALIDOS', { req, detalle: err.extra.validacion });
+            seg.sospecha(req);
         }
-        res.status(201).json({ status: "success", message: "Reporte de falla registrado.", id: resultado.insertId });
-    });
-});
-
-app.put('/api/admin/fallas/:id/estado', (req, res) => {
-    const { estado } = req.body;
-    const estadosValidos = ['Pendiente', 'En reparación', 'Reparado', 'Dado de baja'];
-    if (!estadosValidos.includes(estado)) {
-        return res.status(400).json({ status: "error", message: "Estado no válido." });
+    } else if (err.type === 'entity.too.large') {
+        http = 413; mensaje = 'La información enviada es demasiado grande.';
+    } else if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+        http = 400; mensaje = 'La información enviada no tiene un formato válido.';
+    } else if (err instanceof multer.MulterError) {
+        http = 400; mensaje = err.code === 'LIMIT_FILE_SIZE' ? 'La imagen pesa más de 3 MB.' : 'No se pudo procesar el archivo enviado.';
+    } else {
+        const codigo = crypto.randomBytes(4).toString('hex').toUpperCase();
+        console.error(`[error ${codigo}] ${req.method} ${req.path}`, err);
+        registrar('ERROR_INTERNO', { req, nivel: 'critico', detalle: `[${codigo}] ${err.code || err.name || 'Error'}` });
+        mensaje = `Ocurrió un error interno y no se completó la operación. Intenta de nuevo; si continúa, comparte este código con el administrador: ${codigo}`;
     }
 
-    db.query("UPDATE reporte_falla SET Estado = ? WHERE ID_Falla = ?", [estado, req.params.id], (err) => {
-        if (err) return res.status(500).json({ status: "error", message: "Error al actualizar el estado." });
-        res.json({ status: "success", message: "Estado actualizado." });
-    });
+    if (res.headersSent) return;
+    if (req.path === '/api/qr/verificar' && req.query.formato === 'texto') {
+        return res.status(http).type('text/plain').send(http === 429 ? 'NO DEMASIADAS_PETICIONES' : 'NO ERROR_SERVIDOR');
+    }
+    res.status(http).json({ status: 'error', message: mensaje, error: mensaje });
 });
 
 // --- ENCENDIDO DEL SERVIDOR ---
-app.listen(5000, () => {
-    console.log("Servidor corriendo en el puerto 5000");
+const servidor = app.listen(config.puerto, () => {
+    console.log(`Servidor corriendo en el puerto ${config.puerto}`);
 });
+// Corta conexiones que se quedan abiertas sin enviar nada (ataques tipo "slowloris").
+servidor.headersTimeout = 15000;
+servidor.requestTimeout = 30000;
+
+module.exports = app;

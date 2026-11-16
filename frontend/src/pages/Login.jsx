@@ -11,7 +11,8 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
+  // Si el servidor cerró la sesión (venció), el guardián deja aquí el aviso.
+  const [errorMessage, setErrorMessage] = useState(() => sessionStorage.getItem('aviso_sesion') || '');
   const [recuperarAbierto, setRecuperarAbierto] = useState(false);
 
   // Si ya hay una sesión activa, no mostramos el login
@@ -21,11 +22,11 @@ const Login = () => {
     e.preventDefault();
     setLoading(true);
     setErrorMessage('');
+    sessionStorage.removeItem('aviso_sesion');
 
     try {
       const data = await loginUser(email, password);
 
-      console.log("Respuesta secreta del backend:", data);
 
       if (data.status === "success" || data.user) {
         iniciarSesion(data.user, data.role || 'alumno');

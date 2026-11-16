@@ -12,7 +12,7 @@ const Registro = () => {
     matricula: '',
     carrera: 'Ingeniería en Mecatrónica',
     nivel: 'Ingeniero',
-    semestre: '5° Semestre',
+    semestre: '1',
     telefono: '',
     contrasena: '',
     confirmarContrasena: '',
@@ -67,9 +67,13 @@ const Registro = () => {
       alert("Las contraseñas no coinciden. Por favor verifica.");
       return;
     }
+    if (formData.contrasena.length < 8 || !/[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(formData.contrasena) || !/\d/.test(formData.contrasena)) {
+      alert("La contraseña debe tener al menos 8 caracteres e incluir letras y números.");
+      return;
+    }
 
     try {
-      const response = await fetch('/backend/registro', {
+      const response = await fetch('/backend/api/registro', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -81,7 +85,7 @@ const Registro = () => {
           // Ahora le mandamos los datos extra para que tu servidor los traduzca a IDs
           telefono: formData.telefono,
           carrera_texto: formData.carrera,
-          semestre_texto: formData.semestre
+          semestre: Number(formData.semestre)
         })
       });
 
@@ -259,11 +263,14 @@ const Registro = () => {
                   onChange={handleChange}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold outline-none text-slate-800 focus:border-blue-500 focus:bg-white transition-all"
                 >
-                  <option value="1° Semestre">1° Semestre</option>
-                  <option value="3° Semestre">3° Semestre</option>
-                  <option value="5° Semestre">5° Semestre</option>
-                  <option value="7° Semestre">7° Semestre</option>
-                  <option value="9° Semestre">9° Semestre</option>
+                  <option value="1">1° Semestre</option>
+                  <option value="2">2° Semestre</option>
+                  <option value="3">3° Semestre</option>
+                  <option value="4">4° Semestre</option>
+                  <option value="5">5° Semestre</option>
+                  <option value="6">6° Semestre</option>
+                  <option value="7">7° Semestre</option>
+                  <option value="8">8° Semestre</option>
                 </select>
               </div>
               
@@ -290,7 +297,9 @@ const Registro = () => {
                   value={formData.contrasena}
                   onChange={handleChange}
                   required
-                  placeholder="Mínimo 8 caracteres"
+                  placeholder="Mínimo 8, con letras y números"
+                  minLength={8}
+                  maxLength={72}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold outline-none focus:border-blue-500 focus:bg-white transition-all text-slate-800"
                 />
               </div>

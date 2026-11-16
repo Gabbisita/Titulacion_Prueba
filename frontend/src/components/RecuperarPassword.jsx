@@ -50,7 +50,9 @@ export default function RecuperarPassword({ abierto, onCerrar, emailInicial = ''
     e.preventDefault();
     setError('');
     if (password !== confirmar) return setError('Las contraseñas no coinciden.');
-    if (password.length < 6) return setError('La contraseña debe tener al menos 6 caracteres.');
+    if (password.length < 8 || !/[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(password) || !/\d/.test(password)) {
+      return setError('La contraseña debe tener al menos 8 caracteres, con letras y números.');
+    }
     setCargando(true);
     try {
       const { data } = await api.post('/api/recuperar/confirmar', { email: email.trim(), codigo, password });

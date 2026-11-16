@@ -31,7 +31,18 @@ Los valores se cambian escaneando los códigos de configuración del manual del 
 
 ```
 GET http://<servidor>:5000/api/qr/verificar?formato=texto&casillero=3&codigo=SSC2XXXX...
+X-API-Key: <valor de CASILLERO_API_KEY en backend/.env>
 ```
+
+- **`X-API-Key` (obligatorio):** el casillero se identifica con una clave secreta en este encabezado HTTP. Sin ella el servidor responde `NO NO_AUTORIZADO` y no revela nada sobre el código. La clave se genera con `npm run claves`, se guarda en `backend/.env` como `CASILLERO_API_KEY` y se graba la misma en el firmware. En ESP32 (Arduino):
+
+  ```cpp
+  HTTPClient http;
+  http.begin(url);                       // la URL de arriba
+  http.addHeader("X-API-Key", API_KEY);  // la misma clave que en backend/.env
+  int estado = http.GET();
+  String respuesta = http.getString();   // "OK 3" o "NO ..."
+  ```
 
 - `formato=texto`: la respuesta es texto plano, fácil de procesar en Arduino o ESP32.
 - `casillero=3`: opcional. La puerta solo acepta códigos de su propio casillero.
@@ -45,8 +56,12 @@ Respuestas posibles:
 | `NO PEDIDO_INACTIVO` | QR auténtico, pero el pedido ya se devolvió o se canceló |
 | `NO OTRO_CASILLERO 2` | El código es de otro casillero (el 2) |
 | `NO PEDIDO_INEXISTENTE` / `NO ERROR_SERVIDOR` | No abrir; reintentar o avisar al almacén |
+| `NO NO_AUTORIZADO` | Falta el encabezado `X-API-Key` o la clave no coincide |
+| `NO DEMASIADAS_PETICIONES` | Más de 60 lecturas por minuto; esperar unos segundos |
 
 ## Importante
 
 - **No cambies ni borres `QR_SECRET`** en `backend/.env`. Todos los QR ya enviados dejarían de funcionar.
 - Si el servidor se mueve a otra computadora, copia también `QR_SECRET`.
+- **`CASILLERO_API_KEY` es un secreto:** no la subas a GitHub junto con el firmware. Si se filtra, genera otra, cámbiala en `backend/.env` y vuelve a grabar el ESP32.
+- Cada lectura (autorizada, falsa o sin clave) queda anotada en la **Bitácora de seguridad** del panel de administrador.

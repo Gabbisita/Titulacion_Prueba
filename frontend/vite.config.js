@@ -11,6 +11,8 @@ export default defineConfig({
       '/backend': {
         target: 'http://localhost:5000',
         changeOrigin: true,
+        // Pasa la IP real del visitante al backend (para el rate limiting y la bitácora).
+        xfwd: true,
         rewrite: (path) => path.replace(/^\/backend/, '') || '/',
       },
     },

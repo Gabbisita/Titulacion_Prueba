@@ -22,7 +22,7 @@ const Pedidos = () => {
     // 2. Traemos los datos reales de TiDB
     const buscarPedidos = async () => {
       try {
-        const respuesta = await fetch(`/backend/api/mis-pedidos/${matricula}`);
+        const respuesta = await fetch('/backend/api/mis-pedidos');
         const datos = await respuesta.json();
 
         if (datos.status === "success") {

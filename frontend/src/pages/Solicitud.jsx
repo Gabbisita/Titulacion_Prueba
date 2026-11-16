@@ -76,7 +76,7 @@ const Solicitud = () => {
     return [
       {
         id: 1,
-        nombre: alumnoReal ? alumnoReal.nombre : 'Solicitante',
+        nombre: alumnoReal ? (alumnoReal.Nombre || alumnoReal.nombre) : 'Solicitante',
         matricula: alumnoReal ? alumnoReal.Registro_Alu : '00000000',
         rol: 'Lider'
       }
@@ -98,8 +98,9 @@ const Solicitud = () => {
     }
 
     try {
-      const respuesta = await fetch(`/backend/api/alumnos/buscar?q=${texto}`);
+      const respuesta = await fetch(`/backend/api/alumnos/buscar?q=${encodeURIComponent(texto.trim())}`);
       const data = await respuesta.json();
+      if (!Array.isArray(data)) return;
       
       // Obtenemos el registro del usuario actual (el líder) para excluirlo
       const registroLider = integrantes[0].matricula;
@@ -347,7 +348,7 @@ const Solicitud = () => {
                             </div>
                             <div className="text-left">
                               <p className="text-xs font-bold text-[#1a1f2e] leading-tight">{alumno.nombre}</p>
-                              <p className="text-[10px] text-slate-500 font-medium">{alumno.registro} - {alumno.correo}</p>
+                              <p className="text-[10px] text-slate-500 font-medium">{alumno.registro}</p>
                             </div>
                           </div>
                         ))}

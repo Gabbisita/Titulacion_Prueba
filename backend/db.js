@@ -1,61 +1,49 @@
-require('dotenv').config();
 const mysql = require('mysql2');
+const config = require('./config');
 
-// La base de datos en la nube cierra las conexiones inactivas. Antes, cuando
-// eso pasaba, el servidor se quedaba colgado y el login mostraba
-// "Error de conexión". Ahora la conexión se reabre sola.
-let connection;
+// Grupo de conexiones (pool):
+// - Si la nube cierra una conexión inactiva, el pool abre otra sola.
+// - Cada transacción usa SU PROPIA conexión; así dos peticiones simultáneas
+//   no se mezclan dentro de la misma transacción.
+// - multipleStatements queda apagado: aunque alguien lograra inyectar texto,
+//   no podría encadenar una segunda instrucción (p. ej. "; DROP TABLE ...").
+const pool = mysql.createPool({
+  host: config.db.host,
+  port: config.db.port,
+  user: config.db.user,
+  password: config.db.password,
+  database: config.db.database,
+  ssl: config.db.ssl ? { rejectUnauthorized: true } : undefined,
+  waitForConnections: true,
+  connectionLimit: 5,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
+  connectTimeout: 10000,
+  multipleStatements: false,
+});
+const promesas = pool.promise();
 
-function conectar() {
-  connection = mysql.createConnection({
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASS,
-    database: process.env.DB_NAME,
-    ssl: {
-      rejectUnauthorized: true
-    },
-    enableKeepAlive: true,
-    keepAliveInitialDelay: 10000,
-    connectTimeout: 10000
-  });
+promesas.query('SELECT 1')
+  .then(() => console.log('¡Conectado a la base de datos!'))
+  .catch((err) => console.error('Error de conexión con la base de datos:', err.code || err.message));
 
-  connection.connect((err) => {
-    if (err) {
-      console.error('Error de conexion:', err.message);
-      setTimeout(conectar, 3000);
-      return;
-    }
-    console.log('¡Conectado a la base de datos en la NUBE!');
-  });
+// Todas las consultas usan parámetros (?), nunca texto pegado: evita inyección SQL.
+const consultar = async (sql, parametros) => (await promesas.query(sql, parametros))[0];
 
-  connection.on('error', (err) => {
-    console.error('Se perdió la conexión con la base de datos:', err.code);
-    if (err.fatal) conectar();
-  });
+// Ejecuta fn(consultar) dentro de una transacción. Si fn lanza un error, se deshace todo.
+async function transaccion(fn) {
+  const conexion = await promesas.getConnection();
+  try {
+    await conexion.beginTransaction();
+    const resultado = await fn(async (sql, parametros) => (await conexion.query(sql, parametros))[0]);
+    await conexion.commit();
+    return resultado;
+  } catch (err) {
+    await conexion.rollback().catch(() => {});
+    throw err;
+  } finally {
+    conexion.release();
+  }
 }
 
-conectar();
-
-// Ping periódico para que la nube no cierre la conexión por inactividad.
-setInterval(() => {
-  connection.ping((err) => {
-    if (err) {
-      console.error('Ping falló, reconectando...', err.code);
-      try { connection.destroy(); } catch (_) {}
-      conectar();
-    }
-  });
-}, 60000).unref();
-
-// server.js usa db.query, db.beginTransaction, db.commit y db.rollback;
-// todos se envían a la conexión activa.
-const db = {
-  query: (...args) => connection.query(...args),
-  beginTransaction: (...args) => connection.beginTransaction(...args),
-  commit: (...args) => connection.commit(...args),
-  rollback: (...args) => connection.rollback(...args),
-};
-
-module.exports = db;
+module.exports = { consultar, transaccion, cerrar: () => promesas.end() };

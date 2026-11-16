@@ -1,4 +1,7 @@
 // Manejo central de la sesión.
+// - La sesión REAL vive en el servidor: una cookie httpOnly firmada que JavaScript no
+//   puede leer. Lo que se guarda aquí (nombre, rol) solo sirve para pintar la interfaz;
+//   aunque alguien lo edite a mano, el servidor no le dará permisos que no tiene.
 // - Recargar la página NO cierra la sesión (todo vive en localStorage).
 // - Después de MINUTOS_INACTIVIDAD sin actividad, la sesión se cierra, aunque la
 //   pestaña haya estado cerrada o en segundo plano.
@@ -21,10 +24,23 @@ export function iniciarSesion(usuario, rol) {
   localStorage.setItem(K_ACTIVIDAD, String(Date.now()));
 }
 
-export function cerrarSesion() {
+// Borra los datos de la sesión guardados en este navegador.
+export function limpiarSesionLocal() {
   [K_USUARIO, K_ROL, K_ACTIVIDAD, K_CARRITO].forEach((k) => {
     try { localStorage.removeItem(k); } catch { /* nada */ }
   });
+}
+
+// Cierra la sesión aquí y en el servidor (el servidor borra la cookie de sesión).
+export function cerrarSesion() {
+  const habia = Boolean(leer(K_USUARIO));
+  limpiarSesionLocal();
+  if (habia) fetch('/backend/api/logout', { method: 'POST' }).catch(() => {});
+}
+
+// Actualiza los datos del usuario guardados (por ejemplo, al confirmar su semestre).
+export function actualizarUsuario(usuario) {
+  if (leer(K_USUARIO)) localStorage.setItem(K_USUARIO, JSON.stringify(usuario));
 }
 
 export function sesionExpirada() {

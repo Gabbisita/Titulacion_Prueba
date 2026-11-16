@@ -20,6 +20,8 @@ import CasillerosAdmin from './pages/CasillerosAdmin';
 import EstadisticasAdmin from './pages/EstadisticasAdmin';
 import FallasAdmin from './pages/FallasAdmin';
 import VerificarQR from './pages/VerificarQR';
+import BitacoraAdmin from './pages/BitacoraAdmin';
+import ActualizarCiclo from './components/ActualizarCiclo';
 import Toaster from './components/Toast';
 import RutaProtegida from './components/RutaProtegida';
 import useInactividad from './hooks/useInactividad';
@@ -43,6 +45,7 @@ function App() {
       <ScrollToTop />
       <Toaster />
       <VigilanteSesion />
+      <ActualizarCiclo />
       <Routes>
 
         <Route path="/" element={<Login />} />
@@ -65,6 +68,7 @@ function App() {
         <Route path="/admin/casilleros" element={<RutaProtegida rol="admin"><CasillerosAdmin /></RutaProtegida>} />
         <Route path="/admin/estadisticas" element={<RutaProtegida rol="admin"><EstadisticasAdmin /></RutaProtegida>} />
         <Route path="/admin/fallas" element={<RutaProtegida rol="admin"><FallasAdmin /></RutaProtegida>} />
+        <Route path="/admin/bitacora" element={<RutaProtegida rol="admin"><BitacoraAdmin /></RutaProtegida>} />
         <Route path="/admin/verificar-qr" element={<RutaProtegida rol="admin"><VerificarQR /></RutaProtegida>} />
       </Routes>
     </Router>

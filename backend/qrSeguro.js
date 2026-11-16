@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('./config');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
 
