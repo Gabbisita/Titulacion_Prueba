@@ -1,0 +1,15 @@
+[1mdiff --git a/backend/config.js b/backend/config.js[m
+[1mindex 919e823..d1e4546 100644[m
+[1m--- a/backend/config.js[m
+[1m+++ b/backend/config.js[m
+[36m@@ -1,10 +1,3 @@[m
+[31m-// =======================================================[m
+[31m-// CONFIGURACIÓN CENTRAL (variables de entorno)[m
+[31m-// =======================================================[m
+[31m-// Todos los secretos viven en backend/.env (que NO se sube a GitHub).[m
+[31m-// Usa backend/.env.example como plantilla.[m
+[31m-// Si falta una variable obligatoria, el servidor NO arranca: es mejor fallar al[m
+[31m-// inicio que funcionar a medias con un secreto vacío.[m
+ require('dotenv').config({ path: require('path').join(__dirname, '.env'), quiet: true });[m
+ [m
+ const OBLIGATORIAS = ['DB_HOST', 'DB_USER', 'DB_PASS', 'DB_NAME', 'JWT_SECRET', 'QR_SECRET'];[m

@@ -1,10 +1,3 @@
-// =======================================================
-// CONFIGURACIÓN CENTRAL (variables de entorno)
-// =======================================================
-// Todos los secretos viven en backend/.env (que NO se sube a GitHub).
-// Usa backend/.env.example como plantilla.
-// Si falta una variable obligatoria, el servidor NO arranca: es mejor fallar al
-// inicio que funcionar a medias con un secreto vacío.
 require('dotenv').config({ path: require('path').join(__dirname, '.env'), quiet: true });
 
 const OBLIGATORIAS = ['DB_HOST', 'DB_USER', 'DB_PASS', 'DB_NAME', 'JWT_SECRET', 'QR_SECRET'];
