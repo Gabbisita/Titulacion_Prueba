@@ -274,7 +274,7 @@ const DetallePedido = () => {
       <div className="hidden print:block max-w-[800px] mx-auto p-4 text-left bg-white text-black">
         <div className="flex justify-between items-start border-b-2 border-black pb-6 mb-6">
           <div className="flex items-center gap-4">
-            <img src="/logo.png" alt="Safe Stock CETI" className="w-16 h-16 object-contain" />
+            <img src="/logo.png" alt="SafeStock" className="w-16 h-16 object-contain" />
             <div>
             <h2 className="text-xl font-black uppercase tracking-tight text-slate-900">Safe Stock CETI</h2>
             <p className="text-xs font-bold text-slate-600 uppercase tracking-wide mt-0.5">División de Ingeniería Mecatrónica · Control de Almacén</p>

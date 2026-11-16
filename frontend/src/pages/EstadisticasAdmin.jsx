@@ -10,6 +10,7 @@ import {
 import { obtenerFallas } from '../services/fallasService';
 import { generarReporteCoordinacion, cargarLogo } from '../utils/reportePDF';
 import { TEXTO } from '../utils/paletaGraficas';
+import { mostrarToast } from '../components/notificaciones';
 
 // Tarjeta blanca con título, igual a las demás del panel
 const Tarjeta = ({ titulo, subtitulo, children, className = '' }) => (
@@ -74,7 +75,7 @@ const EstadisticasAdmin = () => {
       generarReporteCoordinacion(estadisticas, inventario, fallasMes, logo);
     } catch (err) {
       console.error("Error al generar el PDF:", err);
-      alert("No se pudo generar el reporte.");
+      mostrarToast("No se pudo generar el reporte.", 'error');
     } finally {
       setGenerando(false);
     }

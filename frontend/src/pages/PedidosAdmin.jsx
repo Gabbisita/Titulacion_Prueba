@@ -53,7 +53,7 @@ const PedidosAdmin = () => {
 
 const confirmarRechazo = async () => {
     if (!motivoRechazo.trim()) {
-      alert("Debes escribir un motivo para rechazar el pedido.");
+      mostrarToast("Debes escribir un motivo para rechazar el pedido.", 'error');
       return;
     }
 
@@ -71,11 +71,11 @@ const confirmarRechazo = async () => {
         setModalAbierto(false);
         mostrarToast('Pedido rechazado. Se envió el motivo por correo al alumno.');
       } else {
-        alert(resultado.message || "Hubo un error al intentar rechazar el pedido en la base de datos.");
+        mostrarToast(resultado.message || "Hubo un error al intentar rechazar el pedido en la base de datos.", 'error');
       }
     } catch (error) {
       console.error("Error de conexión:", error);
-      alert("Error al conectar con el servidor.");
+      mostrarToast("Error al conectar con el servidor.", 'error');
     }
   };
 

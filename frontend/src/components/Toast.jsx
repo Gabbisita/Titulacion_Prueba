@@ -11,7 +11,7 @@ export default function Toaster() {
     const manejar = (e) => {
       const id = ++siguienteId;
       setToasts((prev) => [...prev, { id, ...e.detail }]);
-      setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3000);
+      setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 5000);
     };
     window.addEventListener('safestock:toast', manejar);
     return () => window.removeEventListener('safestock:toast', manejar);

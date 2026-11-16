@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import NavbarAdmin from '../components/NavbarAdmin';
 import AnimatedPage from '../components/AnimatedPage';
+import { mostrarToast } from '../components/notificaciones';
 
 const AsignarCasillero = () => {
   const location = useLocation();
@@ -49,7 +50,7 @@ const AsignarCasillero = () => {
   // --- 2. ENVIAR LA CONFIRMACIÓN AL SERVIDOR ---
   const confirmarAsignacion = async () => {
     if (!casilleroSeleccionado) {
-      alert("Por favor, selecciona un casillero libre primero.");
+      mostrarToast("Por favor, selecciona un casillero libre primero.", 'error');
       return;
     }
 
@@ -67,10 +68,10 @@ const AsignarCasillero = () => {
 
       if (response.ok) {
         const nombreCasillero = casilleros.find(c => c.id === casilleroSeleccionado).nombre;
-        alert(`¡Éxito! Pedido asignado a la ${nombreCasillero}. El inventario se ha descontado.`);
+        mostrarToast(`¡Éxito! Pedido asignado a la ${nombreCasillero}. El inventario se ha descontado.`);
         navigate('/pedidosadmin');
       } else {
-        alert(`Ocurrió un problema: ${resultado.message}`);
+        mostrarToast(`Ocurrió un problema: ${resultado.message}`, 'error');
         // Si alguien ocupó ese casillero mientras tanto, recargamos el mapa real
         setCasilleroSeleccionado(null);
         obtenerCasilleros();
@@ -78,7 +79,7 @@ const AsignarCasillero = () => {
       }
     } catch (error) {
       console.error("Error de conexión:", error);
-      alert("Error crítico conectando con el servidor del almacén.");
+      mostrarToast("Error crítico conectando con el servidor del almacén.", 'error');
       setProcesando(false);
     }
   };

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Logo from '../components/Logo';
+import { mostrarToast } from '../components/notificaciones';
 
 const Registro = () => {
   const navigate = useNavigate();
@@ -60,15 +61,15 @@ const Registro = () => {
     e.preventDefault();
     
     if (!formData.aceptarTerminos) {
-      alert("Debes aceptar los términos y condiciones del sistema.");
+      mostrarToast("Debes aceptar los términos y condiciones del sistema.", 'error');
       return;
     }
     if (formData.contrasena !== formData.confirmarContrasena) {
-      alert("Las contraseñas no coinciden. Por favor verifica.");
+      mostrarToast("Las contraseñas no coinciden. Por favor verifica.", 'error');
       return;
     }
     if (formData.contrasena.length < 8 || !/[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(formData.contrasena) || !/\d/.test(formData.contrasena)) {
-      alert("La contraseña debe tener al menos 8 caracteres e incluir letras y números.");
+      mostrarToast("La contraseña debe tener al menos 8 caracteres e incluir letras y números.", 'error');
       return;
     }
 
@@ -92,16 +93,16 @@ const Registro = () => {
       const data = await response.json();
 
       if (!response.ok) {
-        alert(data.message);
+        mostrarToast(data.message, 'error');
         return;
       }
 
-      alert("¡Cuenta creada con éxito! Bienvenido a SafeStock.");
+      mostrarToast("¡Cuenta creada con éxito! Bienvenido a SafeStock.");
       navigate('/'); 
 
     } catch (error) {
       console.error("Error al registrar:", error);
-      alert("Error de conexión con el servidor. Revisa que esté encendido.");
+      mostrarToast("Error de conexión con el servidor. Revisa que esté encendido.", 'error');
     }
   };
 

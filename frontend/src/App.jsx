@@ -23,6 +23,7 @@ import VerificarQR from './pages/VerificarQR';
 import BitacoraAdmin from './pages/BitacoraAdmin';
 import ActualizarCiclo from './components/ActualizarCiclo';
 import Toaster from './components/Toast';
+import Confirmar from './components/Confirmar';
 import RutaProtegida from './components/RutaProtegida';
 import useInactividad from './hooks/useInactividad';
 
@@ -44,6 +45,7 @@ function App() {
     <Router>
       <ScrollToTop />
       <Toaster />
+      <Confirmar />
       <VigilanteSesion />
       <ActualizarCiclo />
       <Routes>

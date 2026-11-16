@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import NavbarAdmin from '../components/NavbarAdmin';
 import AnimatedPage from '../components/AnimatedPage';
+import { mostrarToast, confirmar } from '../components/notificaciones';
 
 const UsuariosAdmin = () => {
   const [busqueda, setBusqueda] = useState('');
@@ -28,7 +29,7 @@ const UsuariosAdmin = () => {
 
   // --- ELIMINAR USUARIO ---
   const eliminarUsuario = async (registro, nombre) => {
-    if (window.confirm(`ATENCIÓN: ¿Estás seguro de que deseas dar de baja permanentemente al alumno ${nombre} (${registro})?`)) {
+    if (await confirmar(`ATENCIÓN: ¿Estás seguro de que deseas dar de baja permanentemente al alumno ${nombre} (${registro})?`)) {
       try {
         const respuesta = await fetch(`/backend/api/admin/usuarios/${registro}`, {
           method: 'DELETE'
@@ -39,11 +40,11 @@ const UsuariosAdmin = () => {
         if (resultado.status === 'success') {
           obtenerUsuarios(); 
         } else {
-          alert("Error: " + resultado.message);
+          mostrarToast("Error: " + resultado.message, 'error');
         }
       } catch (error) {
         console.error("Error al eliminar:", error);
-        alert("Ocurrió un error al intentar conectar con el servidor.");
+        mostrarToast("Ocurrió un error al intentar conectar con el servidor.", 'error');
       }
     }
   };

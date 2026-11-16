@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import NavbarAdmin from '../components/NavbarAdmin';
 import AnimatedPage from '../components/AnimatedPage';
-import { mostrarToast } from '../components/notificaciones';
+import { confirmar, mostrarToast } from '../components/notificaciones';
 
 const CasillerosAdmin = () => {
   const [casilleros, setCasilleros] = useState([]);
@@ -96,7 +96,7 @@ const CasillerosAdmin = () => {
 
   // --- 4. FORZAR DEVOLUCIÓN (Restaurar Inventario) ---
   const forzarDevolucion = async () => {
-    if (!window.confirm("¿Seguro que deseas liberar esta celda? Los materiales del pedido serán devueltos al inventario automáticamente.")) return;
+    if (!await confirmar("¿Seguro que deseas liberar esta celda? Los materiales del pedido serán devueltos al inventario automáticamente.")) return;
     
     setProcesando(true);
     try {
@@ -106,14 +106,14 @@ const CasillerosAdmin = () => {
       const resultado = await respuesta.json();
       
       if (respuesta.ok) {
-        alert(resultado.message);
+        mostrarToast(resultado.message);
         obtenerCasilleros();
         cerrarModal();
       } else {
-        alert("Error: " + resultado.message);
+        mostrarToast("Error: " + resultado.message, 'error');
       }
     } catch (error) {
-      alert("Error crítico conectando con el servidor.");
+      mostrarToast("Error crítico conectando con el servidor.", 'error');
     } finally {
       setProcesando(false);
     }

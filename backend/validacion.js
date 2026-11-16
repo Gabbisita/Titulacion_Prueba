@@ -37,7 +37,9 @@ const email = z.string({ error: 'Correo: dato no válido.' }).trim().toLowerCase
   .max(100, 'Correo: máximo 100 caracteres.')
   .regex(/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/, 'Escribe un correo válido.');
 
-const matricula = texto('Matrícula', { min: 4, max: 20, patron: /^[A-Za-z0-9-]+$/, mensajePatron: 'Matrícula: solo letras y números, sin espacios.' });
+// En la base la matrícula puede ser numérica (23110115): se acepta número o texto y se trata como texto.
+const numeroATexto = (v) => (typeof v === 'number' && Number.isSafeInteger(v) ? String(v) : v);
+const matricula = z.preprocess(numeroATexto, texto('Matrícula', { min: 4, max: 20, patron: /^[A-Za-z0-9-]+$/, mensajePatron: 'Matrícula: solo letras y números, sin espacios.' }));
 
 // bcrypt solo usa los primeros 72 bytes: no aceptamos contraseñas más largas.
 const passwordNueva = z.string({ error: 'Contraseña: dato no válido.' })
@@ -111,7 +113,7 @@ const esquemas = {
     tipo: texto('Tipo de falla', { max: 40 }),
     severidad: z.enum(['Leve', 'Moderada', 'Grave'], { error: 'Severidad no válida.' }),
     pedido: texto('Folio', { min: 0, max: 50, patron: /^[A-Za-z0-9_-]*$/ }).optional().nullable(),
-    matricula: texto('Matrícula', { min: 0, max: 20, patron: /^[A-Za-z0-9-]*$/ }).optional().nullable(),
+    matricula: z.preprocess(numeroATexto, texto('Matrícula', { min: 0, max: 20, patron: /^[A-Za-z0-9-]*$/ }).optional().nullable()),
     descripcion: texto('Descripción', { min: 5, max: 2000 }),
   }),
   estadoFalla: z.object({ estado: z.enum(['Pendiente', 'En reparación', 'Reparado', 'Dado de baja'], { error: 'Estado no válido.' }) }),

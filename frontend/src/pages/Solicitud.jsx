@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import AnimatedPage from '../components/AnimatedPage';
+import { mostrarToast } from '../components/notificaciones';
 
 const Solicitud = () => {
   const navigate = useNavigate();
@@ -152,10 +153,10 @@ const Solicitud = () => {
   };
 
   const enviarSolicitud = async () => {
-    if (!horaRecogida) return alert("Por favor, selecciona la hora a la que recogerás el material.");
-    if (!horaDevolucion) return alert("Por favor, selecciona la hora límite en la que devolverás el material.");
-    if (!proposito || !proposito.trim()) return alert("Por favor, escribe el propósito del proyecto antes de enviar la solicitud.");
-    if (materiales.length === 0) return alert("No hay materiales en tu resumen para solicitar.");
+    if (!horaRecogida) return mostrarToast("Por favor, selecciona la hora a la que recogerás el material.", 'error');
+    if (!horaDevolucion) return mostrarToast("Por favor, selecciona la hora límite en la que devolverás el material.", 'error');
+    if (!proposito || !proposito.trim()) return mostrarToast("Por favor, escribe el propósito del proyecto antes de enviar la solicitud.", 'error');
+    if (materiales.length === 0) return mostrarToast("No hay materiales en tu resumen para solicitar.", 'error');
 
     const paqueteDatos = {
       id_pedido: `PED-2026-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -178,16 +179,16 @@ const Solicitud = () => {
       const datosServidor = await respuesta.json();
 
       if (datosServidor.status === "success") {
-        alert("¡Solicitud registrada oficialmente en SafeStock!");
+        mostrarToast("¡Solicitud registrada oficialmente en SafeStock!");
         localStorage.removeItem('solicitud_materiales_safe');
         navigate('/pedidos');
       } else {
-        alert("Hubo un problema: " + datosServidor.message);
+        mostrarToast("Hubo un problema: " + datosServidor.message, 'error');
       }
 
     } catch (error) {
       console.error("Error de conexión:", error);
-      alert("Error al conectar con el servidor. Revisa que Node.js esté encendido.");
+      mostrarToast("Error al conectar con el servidor. Revisa que Node.js esté encendido.", 'error');
     }
   };
   

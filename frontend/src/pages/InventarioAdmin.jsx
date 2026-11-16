@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import NavbarAdmin from '../components/NavbarAdmin';
 import AnimatedPage from '../components/AnimatedPage';
+import { mostrarToast, confirmar } from '../components/notificaciones';
 
 const InventarioAdmin = () => {
   const [busqueda, setBusqueda] = useState('');
@@ -150,7 +151,7 @@ const InventarioAdmin = () => {
         obtenerMateriales(); 
         cerrarModal();
       } else {
-        alert("Hubo un error al guardar: " + resultado.error);
+        mostrarToast("Hubo un error al guardar: " + resultado.error, 'error');
       }
     } catch (error) {
       console.error("Error al guardar:", error);
@@ -159,7 +160,7 @@ const InventarioAdmin = () => {
 
   // --- 3. ELIMINAR (DELETE) ---
   const eliminarMaterial = async (id) => {
-    if (window.confirm('¿Estás seguro de que deseas dar de baja este material del inventario? Esta acción no se puede deshacer.')) {
+    if (await confirmar('¿Estás seguro de que deseas dar de baja este material del inventario? Esta acción no se puede deshacer.')) {
       try {
         const respuesta = await fetch(`/backend/api/admin/materiales/${id}`, { method: 'DELETE' });
         const resultado = await respuesta.json();
@@ -167,7 +168,7 @@ const InventarioAdmin = () => {
         if (resultado.status === 'success') {
           obtenerMateriales();
         } else {
-          alert("Error al eliminar.");
+          mostrarToast("Error al eliminar.", 'error');
         }
       } catch (error) {
         console.error("Error al eliminar:", error);
