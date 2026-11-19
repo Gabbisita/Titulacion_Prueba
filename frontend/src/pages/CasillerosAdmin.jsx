@@ -6,13 +6,14 @@ import { confirmar, mostrarToast } from '../components/notificaciones';
 
 const CasillerosAdmin = () => {
   const [casilleros, setCasilleros] = useState([]);
-  
+  const [puertas, setPuertas] = useState({});
+
   // Estados para el Modal
   const [modalAbierto, setModalAbierto] = useState(false);
   const [casilleroSeleccionado, setCasilleroSeleccionado] = useState(null);
   const [nuevoEstado, setNuevoEstado] = useState(1);
   const [procesando, setProcesando] = useState(false);
-  
+
   // Estado nuevo para guardar los datos del alumno ocupante
   const [pedidoActivo, setPedidoActivo] = useState(null);
 
@@ -23,13 +24,13 @@ const CasillerosAdmin = () => {
       const data = await respuesta.json();
 
       const mapaCasilleros = data.map((celda) => {
-        let estadoNumerico = 1; 
-        if (celda.Fk_Estado === 2) estadoNumerico = 2; 
-        if (celda.Fk_Estado === 3) estadoNumerico = 3; 
+        let estadoNumerico = 1;
+        if (celda.Fk_Estado === 2) estadoNumerico = 2;
+        if (celda.Fk_Estado === 3) estadoNumerico = 3;
 
         return {
           id: celda.ID_Casillero,
-          nombre: celda.Identificador || `Celda ${String(celda.ID_Casillero).padStart(2, '0')}`, 
+          nombre: celda.Identificador || `Celda ${String(celda.ID_Casillero).padStart(2, '0')}`,
           estado: estadoNumerico
         };
       });
@@ -39,17 +40,42 @@ const CasillerosAdmin = () => {
     }
   };
 
+  // --- 1B. CARGAR ESTADO FÍSICO DE PUERTAS (ESP32) ---
+  const obtenerEstadoPuertas = async () => {
+    try {
+      const respuesta = await fetch('/backend/api/admin/casilleros/puertas');
+      if (!respuesta.ok) return;
+      const data = await respuesta.json();
+      setPuertas(data || {});
+    } catch (error) {
+      console.error("Error al consultar estado de puertas:", error);
+    }
+  };
+
   useEffect(() => {
     obtenerCasilleros();
+    obtenerEstadoPuertas();
+
+    const intervalo = setInterval(() => {
+      obtenerEstadoPuertas();
+    }, 2000);
+
+    return () => clearInterval(intervalo);
   }, []);
+
+  const textoPuerta = (idCelda) => {
+    const valor = puertas[idCelda];
+    if (valor === true) return 'Puerta abierta';
+    if (valor === false) return 'Puerta cerrada';
+    return 'Sin dato de sensor';
+  };
 
   // --- 2. ABRIR MODAL INTELIGENTE ---
   const abrirModal = async (casillero) => {
     setCasilleroSeleccionado(casillero);
     setNuevoEstado(casillero.estado);
-    setPedidoActivo(null); // Limpiamos por si acaso
+    setPedidoActivo(null);
 
-    // SI ESTÁ OCUPADO (2), buscamos quién está adentro
     if (casillero.estado === 2) {
       try {
         const res = await fetch(`/backend/api/admin/casilleros/${casillero.id}/pedido`);
@@ -59,7 +85,7 @@ const CasillerosAdmin = () => {
         console.error("Error buscando pedido:", error);
       }
     }
-    
+
     setModalAbierto(true);
   };
 
@@ -97,14 +123,14 @@ const CasillerosAdmin = () => {
   // --- 4. FORZAR DEVOLUCIÓN (Restaurar Inventario) ---
   const forzarDevolucion = async () => {
     if (!await confirmar("¿Seguro que deseas liberar esta celda? Los materiales del pedido serán devueltos al inventario automáticamente.")) return;
-    
+
     setProcesando(true);
     try {
       const respuesta = await fetch(`/backend/api/admin/casilleros/${casilleroSeleccionado.id}/liberar`, {
         method: 'PUT'
       });
       const resultado = await respuesta.json();
-      
+
       if (respuesta.ok) {
         mostrarToast(resultado.message);
         obtenerCasilleros();
@@ -124,13 +150,13 @@ const CasillerosAdmin = () => {
       <div className="min-h-screen bg-[#f8f9fc] font-sans pb-20 text-slate-700">
         <NavbarAdmin />
         <div className="max-w-6xl mx-auto px-6 pt-12">
-          
+
           <header className="mb-10 text-center md:text-left flex flex-col md:flex-row justify-between items-center gap-6">
             <div>
               <h1 className="text-4xl font-black text-[#1a1f2e] tracking-tight mb-2 uppercase italic">Control de Casilleros</h1>
               <p className="text-slate-500 font-medium">Supervisa y modifica manualmente el estado físico de los lockers del almacén.</p>
             </div>
-            
+
             <div className="flex gap-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 rounded bg-slate-50 border border-slate-200"></div>
@@ -152,23 +178,39 @@ const CasillerosAdmin = () => {
               {casilleros.length === 0 ? (
                 <div className="col-span-full text-center text-slate-400 font-bold py-10 animate-pulse">Cargando celdas físicas...</div>
               ) : (
-                casilleros.map((celda) => (
-                  <motion.button
-                    key={celda.id}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => abrirModal(celda)}
-                    className={`
-                      aspect-square rounded-3xl flex flex-col items-center justify-center border-2 transition-all relative overflow-hidden cursor-pointer shadow-sm hover:shadow-md
-                      ${celda.estado === 2 ? 'bg-[#1a1f2e] border-[#1a1f2e] text-white opacity-95' : ''}
-                      ${celda.estado === 3 ? 'bg-amber-50 border-amber-200 text-amber-600' : ''}
-                      ${celda.estado === 1 ? 'bg-slate-50 border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600' : ''}
-                    `}
-                  >
-                    <span className="text-3xl mb-2">{celda.estado === 2 ? '🔒' : celda.estado === 3 ? '🚧' : '📦'}</span>
-                    <span className="font-black text-lg">{celda.nombre.split(' ')[1] || celda.id}</span>
-                  </motion.button>
-                ))
+                casilleros.map((celda) => {
+                  const puertaAbierta = puertas[celda.id] === true;
+                  const puertaCerrada = puertas[celda.id] === false;
+
+                  return (
+                    <motion.button
+                      key={celda.id}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => abrirModal(celda)}
+                      className={`
+                        aspect-square rounded-3xl flex flex-col items-center justify-center border-2 transition-all relative overflow-hidden cursor-pointer shadow-sm hover:shadow-md p-3
+                        ${celda.estado === 2 ? 'bg-[#1a1f2e] border-[#1a1f2e] text-white opacity-95' : ''}
+                        ${celda.estado === 3 ? 'bg-amber-50 border-amber-200 text-amber-600' : ''}
+                        ${celda.estado === 1 ? 'bg-slate-50 border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600' : ''}
+                      `}
+                    >
+                      <span className="text-3xl mb-1">{celda.estado === 2 ? '🔒' : celda.estado === 3 ? '🚧' : '📦'}</span>
+                      <span className="font-black text-lg">{celda.nombre.split(' ')[1] || celda.id}</span>
+                      <span
+                        className={`mt-2 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
+                          puertaAbierta
+                            ? 'bg-red-500/20 text-red-500 border border-red-400/40'
+                            : puertaCerrada
+                            ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-400/40'
+                            : 'bg-slate-200/60 text-slate-500'
+                        }`}
+                      >
+                        {textoPuerta(celda.id)}
+                      </span>
+                    </motion.button>
+                  );
+                })
               )}
             </div>
           </div>
@@ -178,15 +220,20 @@ const CasillerosAdmin = () => {
         <AnimatePresence>
           {modalAbierto && casilleroSeleccionado && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
                 className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl text-left"
               >
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                  <h3 className="font-black text-[#1a1f2e] text-lg uppercase italic tracking-tight">{casilleroSeleccionado.nombre}</h3>
+                  <div>
+                    <h3 className="font-black text-[#1a1f2e] text-lg uppercase italic tracking-tight">{casilleroSeleccionado.nombre}</h3>
+                    <p className="text-[11px] font-bold text-slate-500 mt-0.5">
+                      Estado físico: <span className="text-[#1a1f2e]">{textoPuerta(casilleroSeleccionado.id)}</span>
+                    </p>
+                  </div>
                   <button onClick={cerrarModal} className="text-slate-400 hover:text-red-500 text-xl font-black transition-colors">✕</button>
                 </div>
-                
+
                 <div className="p-6">
                   {/* SI ESTÁ OCUPADO: VISTA DE DEVOLUCIÓN */}
                   {casilleroSeleccionado.estado === 2 ? (
@@ -203,8 +250,8 @@ const CasillerosAdmin = () => {
                       )}
 
                       <p className="text-[10px] text-slate-400 mb-4 font-bold text-center">Al liberar este casillero, el pedido se marcará como finalizado y el stock regresará al inventario.</p>
-                      
-                      <button 
+
+                      <button
                         onClick={forzarDevolucion} disabled={procesando}
                         className="w-full bg-red-500 hover:bg-red-600 text-white font-black py-4 rounded-xl uppercase tracking-tight text-xs transition-transform active:scale-[0.98] disabled:bg-slate-300 shadow-lg shadow-red-500/20"
                       >
@@ -216,14 +263,14 @@ const CasillerosAdmin = () => {
                     <form onSubmit={guardarEstadoNormal}>
                       <div className="mb-6">
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Mantenimiento de Celda</label>
-                        <select 
-                          value={nuevoEstado} onChange={(e) => setNuevoEstado(e.target.value)} 
+                        <select
+                          value={nuevoEstado} onChange={(e) => setNuevoEstado(e.target.value)}
                           className="w-full border-2 border-slate-200 p-3.5 rounded-xl outline-none focus:border-blue-500 text-sm font-bold bg-white cursor-pointer"
                         >
                           <option value={1}>📦 Libre / Disponible</option>
                           <option value={3}>🚧 En Mantenimiento</option>
                         </select>
-                        
+
                         {nuevoEstado == 3 && (
                           <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 flex gap-3 items-start">
                             <span className="text-amber-500">⚠️</span>

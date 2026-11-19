@@ -42,7 +42,8 @@ const Solicitud = () => {
   };
 
   const opcionesFechas = generarFechas();
-  const [fecha, setFecha] = useState(opcionesFechas[1].valorLargo);
+  // MODIFICACIÓN DEMO: Se cambia el [1] por [0] para que seleccione "Hoy" por defecto
+  const [fecha, setFecha] = useState(opcionesFechas[0].valorLargo);
   
   // --- ESTADOS DE HORARIOS ---
   const [horaRecogida, setHoraRecogida] = useState('');
@@ -87,8 +88,7 @@ const Solicitud = () => {
   const [busquedaIntegrante, setBusquedaIntegrante] = useState('');
   const [resultadosBusqueda, setResultadosBusqueda] = useState([]);
 
-
-// --- NUEVA LÓGICA DEL BUSCADOR CONECTADA A MYSQL ---
+  // --- NUEVA LÓGICA DEL BUSCADOR CONECTADA A MYSQL ---
   const manejarBusquedaIntegrante = async (e) => { 
     const texto = e.target.value;
     setBusquedaIntegrante(texto);
@@ -103,10 +103,7 @@ const Solicitud = () => {
       const data = await respuesta.json();
       if (!Array.isArray(data)) return;
       
-      // Obtenemos el registro del usuario actual (el líder) para excluirlo
       const registroLider = integrantes[0].matricula;
-      
-      // FILTRO PROFESIONAL: Quitamos al líder de los resultados
       const resultadosFiltrados = data.filter(alumno => alumno.registro !== registroLider);
       
       setResultadosBusqueda(resultadosFiltrados);
@@ -127,8 +124,6 @@ const Solicitud = () => {
     setBusquedaIntegrante('');
     setResultadosBusqueda([]);
   };
-  // ---------------------------------------------
-  // ---------------------------------------------
 
   const [materiales, setMateriales] = useState(() => {
     const guardados = localStorage.getItem('solicitud_materiales_safe');
@@ -206,6 +201,7 @@ const Solicitud = () => {
             <p className="text-slate-400 font-medium text-xs">Completa los datos para formalizar tu pedido</p>
           </header>
 
+          {/* MODIFICACIÓN DEMO: Aviso rojo oculto temporalmente
           <div className="bg-red-50 border border-red-100 rounded-2xl p-5 flex items-start gap-4 mb-8">
             <span className="text-red-500 text-lg mt-0.5">📋</span>
             <p className="text-red-900 text-xs leading-relaxed">
@@ -213,6 +209,7 @@ const Solicitud = () => {
               Las solicitudes deben realizarse <span className="font-bold">antes de las 11:59 p.m. del día anterior</span> a la fecha de recogida. No es posible solicitar materiales para el mismo día.
             </p>
           </div>
+          */}
 
           <section className="mb-8">
             <h3 className="text-slate-500 text-[10px] font-black uppercase tracking-widest mb-3">Fecha de recogida *</h3>
@@ -229,17 +226,15 @@ const Solicitud = () => {
                   <button 
                     key={f.id}
                     type="button" 
-                    disabled={f.esHoy} 
+                    // MODIFICACIÓN DEMO: Se quitó disabled={f.esHoy} y se actualizó el className
                     onClick={() => setFecha(f.valorLargo)} 
                     className={`shrink-0 px-4 py-2 rounded-xl transition-all ${
-                      f.esHoy 
-                        ? 'text-slate-300 bg-slate-50 cursor-not-allowed border border-slate-100' 
-                        : fecha === f.valorLargo 
-                          ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' 
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      fecha === f.valorLargo 
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' 
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
-                    {f.esHoy ? `Hoy` : f.etiquetaBoton} {fecha === f.valorLargo && !f.esHoy && '✓'}
+                    {f.esHoy ? `Hoy` : f.etiquetaBoton} {fecha === f.valorLargo && '✓'}
                   </button>
                 ))}
               </div>
@@ -310,7 +305,6 @@ const Solicitud = () => {
               <motion.section initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mb-8">
                 <h3 className="text-slate-500 text-[10px] font-black uppercase tracking-widest mb-3">Integrantes del equipo *</h3>
                 
-                {/* Contenedor sin overflow-hidden para que el menú pueda flotar */}
                 <div className="border border-slate-200 rounded-xl bg-white text-xs">
                   {integrantes.map((integ) => (
                     <div key={integ.id} className="flex items-center justify-between p-3.5 border-b border-slate-100 last:border-0">
@@ -325,7 +319,6 @@ const Solicitud = () => {
                     </div>
                   ))}
                   
-                  {/* BUSCADOR PREDICTIVO */}
                   <div className="p-3 bg-slate-50 border-t border-slate-100 rounded-b-xl relative">
                     <input
                       type="text"
@@ -335,7 +328,6 @@ const Solicitud = () => {
                       className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold outline-none uppercase transition-colors focus:border-blue-500"
                     />
 
-                    {/* MENÚ DESPLEGABLE TIPO GMAIL */}
                     {resultadosBusqueda.length > 0 && (
                       <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden max-h-48 overflow-y-auto mx-3">
                         {resultadosBusqueda.map((alumno) => (

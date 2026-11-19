@@ -40,6 +40,43 @@ app.use(seg.limites.general);                        // rate limiting general
 const soloAlumno = seg.requiereRol('alumno');
 const soloAdmin = seg.requiereRol('admin');
 
+// Estado en memoria de las puertas físicas reportadas por el ESP32 secundario vía ESP32 principal
+let estadoPuertas = {
+    1: null,
+    2: null,
+    3: null,
+    4: null,
+    actualizadoEn: null,
+};
+
+// ESP32 Principal reporta el estado físico de las 4 puertas usando X-API-Key
+app.post('/api/casilleros/puertas', (req, res, next) => {
+    try {
+        if (!seg.claveCasilleroValida(req)) {
+            registrar('PUERTAS_SIN_AUTORIZACION', {
+                req,
+                nivel: 'alerta',
+                detalle: req.get('x-api-key') ? 'API key incorrecta' : 'Sin API key',
+            });
+            seg.sospecha(req, 3);
+            throw new ErrorHttp(401, 'No autorizado.');
+        }
+
+        const { puerta1, puerta2, puerta3, puerta4 } = req.body || {};
+        estadoPuertas = {
+            1: typeof puerta1 === 'boolean' ? puerta1 : estadoPuertas[1],
+            2: typeof puerta2 === 'boolean' ? puerta2 : estadoPuertas[2],
+            3: typeof puerta3 === 'boolean' ? puerta3 : estadoPuertas[3],
+            4: typeof puerta4 === 'boolean' ? puerta4 : estadoPuertas[4],
+            actualizadoEn: new Date().toISOString(),
+        };
+
+        res.json({ status: 'success', puertas: estadoPuertas });
+    } catch (err) {
+        next(err);
+    }
+});
+
 // TODO lo que empiece con /api/admin exige sesión de administrador, sin excepción.
 // Así una ruta nueva de administrador queda protegida aunque se olvide ponerle el candado.
 app.use('/api/admin', soloAdmin);
@@ -596,6 +633,10 @@ app.put('/api/admin/pedidos/:id/rechazar', async (req, res) => {
 // =======================================================
 // ADMINISTRADOR: CASILLEROS
 // =======================================================
+app.get('/api/admin/casilleros/puertas', (req, res) => {
+    res.json(estadoPuertas);
+});
+
 app.put('/api/admin/casilleros/:id/estado', async (req, res) => {
     const idCasillero = leer(esquemas.idNumerico, req.params.id);
     const { nuevo_estado } = leer(esquemas.estadoCasillero, req.body);
